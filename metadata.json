@@ -1,0 +1,8 @@
+{
+  "name": "Aetheliz SaaS Platform",
+  "description": "Production-grade structural diagnostic platform for scientific minds. Features B2B and B2C workspaces with advanced analytics and diagnostic tools.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
