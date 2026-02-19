@@ -69,13 +69,8 @@ export default function RegisterPage() {
     }
 
     // Normal flow (auto-login after signup)
-    if (accountType === "institution") {
-      router.push("/workspace/setup/wizard")
-    } else {
-      router.push("/workspace/router")
-    }
-
-    router.refresh()
+    router.push("/b2c")
+router.refresh()
     setLoading(false)
   }
 

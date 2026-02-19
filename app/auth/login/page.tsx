@@ -31,8 +31,8 @@ export default function LoginPage() {
     }
 
     // ✅ Let Next.js handle navigation (no hard reload)
-    router.push("/workspace/router")
-    router.refresh()
+    router.push("/b2c")
+router.refresh()
   }
 
   return (
