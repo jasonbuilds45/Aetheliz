@@ -69,7 +69,7 @@ export default function RegisterPage() {
     }
 
     // Normal flow (auto-login after signup)
-    router.push("/b2c")
+    router.push("/dashboard")
 router.refresh()
     setLoading(false)
   }
