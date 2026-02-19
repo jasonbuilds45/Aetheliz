@@ -19,10 +19,7 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
       setError(error.message)
@@ -30,9 +27,8 @@ export default function LoginPage() {
       return
     }
 
-    // ✅ Let Next.js handle navigation (no hard reload)
     router.push("/dashboard")
-router.refresh()
+    router.refresh()
   }
 
   return (
@@ -50,9 +46,7 @@ router.refresh()
           <blockquote className="text-white/90 text-xl font-medium leading-relaxed mb-6 italic">
             &ldquo;Aetheliz gave us a window into how our students actually think — not just what they score.&rdquo;
           </blockquote>
-          <p className="text-white/60 text-sm font-semibold">
-            Dr. Patricia Osei · Academic Director, Westbridge Academy
-          </p>
+          <p className="text-white/60 text-sm font-semibold">Dr. Patricia Osei · Academic Director, Westbridge Academy</p>
         </div>
         <div className="relative flex gap-8">
           <div>
@@ -77,24 +71,17 @@ router.refresh()
             <div className="size-8 bg-primary rounded-lg flex items-center justify-center">
               <span className="material-symbols-outlined text-white text-lg">analytics</span>
             </div>
-            <span className="text-lg font-black text-primary uppercase italic tracking-tight">
-              Aetheliz
-            </span>
+            <span className="text-lg font-black text-primary uppercase italic tracking-tight">Aetheliz</span>
           </Link>
 
           <div className="mb-8">
-            <h1 className="text-3xl font-black text-slate-900 tracking-tight">
-              Welcome back
-            </h1>
+            <h1 className="text-3xl font-black text-slate-900 tracking-tight">Welcome back</h1>
             <p className="text-slate-500 mt-2">Sign in to your workspace</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label
-                htmlFor="email"
-                className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5"
-              >
+              <label htmlFor="email" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
                 Email address
               </label>
               <input
@@ -111,14 +98,9 @@ router.refresh()
             </div>
 
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label
-                  htmlFor="password"
-                  className="block text-xs font-bold text-slate-500 uppercase tracking-wider"
-                >
-                  Password
-                </label>
-              </div>
+              <label htmlFor="password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                Password
+              </label>
               <input
                 id="password"
                 type="password"
@@ -134,9 +116,7 @@ router.refresh()
 
             {error && (
               <div className="flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
-                <span className="material-symbols-outlined text-lg shrink-0 mt-0.5">
-                  error
-                </span>
+                <span className="material-symbols-outlined text-lg shrink-0 mt-0.5">error</span>
                 {error}
               </div>
             )}
@@ -144,21 +124,17 @@ router.refresh()
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-primary text-white font-bold py-3.5 px-4 rounded-xl hover:bg-primary-800 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-primary/25 flex items-center justify-center gap-2"
+              className="w-full bg-primary text-white font-bold py-3.5 px-4 rounded-xl hover:bg-primary-800 disabled:opacity-50 transition-all shadow-lg shadow-primary/25 flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>
-                  <span className="material-symbols-outlined text-xl animate-spin">
-                    refresh
-                  </span>
+                  <span className="material-symbols-outlined text-xl animate-spin">refresh</span>
                   Signing in…
                 </>
               ) : (
                 <>
                   Sign in
-                  <span className="material-symbols-outlined text-xl">
-                    arrow_forward
-                  </span>
+                  <span className="material-symbols-outlined text-xl">arrow_forward</span>
                 </>
               )}
             </button>
@@ -166,19 +142,13 @@ router.refresh()
 
           <p className="mt-8 text-center text-sm text-slate-500">
             Don&apos;t have an account?{" "}
-            <Link
-              href="/auth/register"
-              className="text-primary font-bold hover:underline"
-            >
+            <Link href="/auth/register" className="text-primary font-bold hover:underline">
               Create one free
             </Link>
           </p>
 
           <p className="mt-4 text-center">
-            <Link
-              href="/"
-              className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
-            >
+            <Link href="/" className="text-xs text-slate-400 hover:text-slate-600 transition-colors">
               ← Back to home
             </Link>
           </p>

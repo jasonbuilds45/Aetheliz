@@ -1,13 +1,10 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
+import { WorkspaceShell } from '@/components/layout/WorkspaceShell'
 
-export default async function B2CLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  const cookieStore = cookies()
+export default async function B2CLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies()
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,11 +21,24 @@ export default async function B2CLayout({
   )
 
   const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user
 
-  if (!user) {
+  if (!session) {
     redirect('/auth/login')
   }
 
-  return <>{children}</>
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id, email, full_name, role, institution_id, tenant_id')
+    .eq('id', session.user.id)
+    .maybeSingle()
+
+  if (!profile) {
+    redirect('/auth/login')
+  }
+
+  return (
+    <WorkspaceShell profile={profile}>
+      {children}
+    </WorkspaceShell>
+  )
 }
