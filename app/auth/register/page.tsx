@@ -56,13 +56,14 @@ export default function RegisterPage() {
       return
     }
 
+    // Wait for auth state to propagate, then do full page refresh
+    await new Promise(resolve => setTimeout(resolve, 500))
+    
     // Institution accounts go directly to onboarding wizard
     // Student accounts go to the workspace router for role-based routing
-    router.replace(
-      accountType === 'institution'
-        ? '/workspace/setup/wizard'
-        : '/workspace/router'
-    )
+    window.location.href = accountType === 'institution'
+      ? '/workspace/setup/wizard'
+      : '/workspace/router'
   }
 
   return (

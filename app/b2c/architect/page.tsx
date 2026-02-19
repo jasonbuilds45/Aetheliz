@@ -60,7 +60,7 @@ export default function ArchitectPage() {
           
           <Card className="bg-slate-900 text-white border-none shadow-xl">
             <h3 className="text-[10px] font-black uppercase text-slate-400 mb-2">Discovery Queue</h3>
-            <p className="text-xs text-slate-300 mb-4 leading-relaxed italic">The following nodes are locked until your foundation stabilizes to > 80%.</p>
+            <p className="text-xs text-slate-300 mb-4 leading-relaxed italic">The following nodes are locked until your foundation stabilizes to &gt; 80%.</p>
             <div className="space-y-2">
               {['Electrophilic Substitution', 'Phenols & Ethers'].map(node => (
                 <div key={node} className="flex items-center justify-between p-2 bg-white/5 rounded border border-white/10 opacity-50">

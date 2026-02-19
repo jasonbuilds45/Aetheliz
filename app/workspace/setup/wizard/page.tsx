@@ -90,7 +90,7 @@ export default function SetupWizard() {
   const [error, setError]     = useState<string | null>(null)
   const [newGrade, setNewGrade]   = useState("")
   const [newSubject, setNewSubject] = useState("")
-  const [newInvite, setNewInvite] = useState({ email: "", role: "teacher" as const })
+  const [newInvite, setNewInvite] = useState<{ email: string; role: 'teacher' | 'principal' }>({ email: "", role: "teacher" })
 
   const [data, setData] = useState<WizardData>({
     institutionName: "",

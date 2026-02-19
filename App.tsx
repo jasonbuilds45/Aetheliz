@@ -1,2 +1,2 @@
-// This file is deprecated in Next.js App Router projects.
-export default function DeprecatedApp() { return null; }
+// Deprecated SPA entry — not used in Next.js App Router.
+export default function DeprecatedApp() { return null }

@@ -27,7 +27,10 @@ export default function LoginPage() {
       return
     }
 
-    router.replace("/workspace/router")
+    // Wait for auth state to propagate, then do a full page refresh
+    // This ensures middleware sees the session and routes correctly
+    await new Promise(resolve => setTimeout(resolve, 500))
+    window.location.href = "/workspace/router"
   }
 
   return (

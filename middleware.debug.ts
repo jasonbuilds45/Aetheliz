@@ -1,2 +1,2 @@
-// Removed: debug middleware. Production middleware is at /middleware.ts
+// Deprecated debug middleware — not active.
 export {}

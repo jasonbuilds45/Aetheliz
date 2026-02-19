@@ -1,18 +1,14 @@
+import type { Profile } from '../types'
 
-import { User, UserRole } from '../types';
-
-export const getCurrentUserProfile = async (): Promise<User> => {
-  // Mocking database fetch
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({
-        id: 'user-123',
-        email: 'eleanor.vance@academy.edu',
-        full_name: 'Eleanor Vance',
-        role: UserRole.PRINCIPAL, // Testing with Principal role
-        avatar_url: 'https://picsum.photos/seed/eleanor/200',
-        workspace_id: 'ws-789'
-      });
-    }, 500);
-  });
-};
+// Temporary stub — replace with real Supabase query when needed.
+// The real profile is fetched by useAuth() via supabaseBrowser.
+export const getCurrentUserProfile = async (): Promise<Profile> => {
+  return {
+    id: '',
+    email: '',
+    full_name: '',
+    role: 'principal',
+    institution_id: null,
+    tenant_id: null,
+  }
+}
