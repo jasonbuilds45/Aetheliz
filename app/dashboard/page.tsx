@@ -21,9 +21,11 @@ export default async function DashboardRouter() {
   )
 
   // ─────────────────────────────────────────────
-  // 1️⃣ Ensure user is authenticated
+  // 1️⃣ Ensure authentication
   // ─────────────────────────────────────────────
-  const { data: { session } } = await supabase.auth.getSession()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
 
   if (!session) {
     redirect('/auth/login')
@@ -45,29 +47,42 @@ export default async function DashboardRouter() {
   const role = profile.role as UserRole
 
   // ─────────────────────────────────────────────
-  // 3️⃣ Enforce onboarding for principals
-  // ─────────────────────────────────────────────
-  if (role === 'principal' && !profile.tenant_id) {
-    redirect('/workspace/setup/wizard')
-  }
-
-  // ─────────────────────────────────────────────
-  // 4️⃣ Deterministic routing by role
+  // 3️⃣ Principal onboarding enforcement
   // ─────────────────────────────────────────────
   if (role === 'principal') {
+    if (!profile.tenant_id) {
+      redirect('/workspace/setup/wizard')
+    }
+
     redirect('/b2b/principal')
   }
 
+  // ─────────────────────────────────────────────
+  // 4️⃣ Teacher routing
+  // ─────────────────────────────────────────────
   if (role === 'teacher') {
     redirect('/b2b/teacher')
   }
 
+  // ─────────────────────────────────────────────
+  // 5️⃣ Student calibration enforcement
+  // ─────────────────────────────────────────────
   if (role === 'student') {
+    const { data: settings } = await supabase
+      .from('student_settings')
+      .select('user_id')
+      .eq('user_id', session.user.id)
+      .maybeSingle()
+
+    if (!settings) {
+      redirect('/b2c/onboarding')
+    }
+
     redirect('/b2c')
   }
 
   // ─────────────────────────────────────────────
-  // 5️⃣ Fallback (should never happen)
+  // 6️⃣ Fallback (should never happen)
   // ─────────────────────────────────────────────
   redirect('/auth/login')
 }
