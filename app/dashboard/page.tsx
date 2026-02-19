@@ -3,12 +3,6 @@ import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import type { UserRole } from '@/types'
 
-const ROLE_DESTINATIONS: Record<UserRole, string> = {
-  principal: '/b2b/principal',
-  teacher:   '/b2b/teacher',
-  student:   '/b2c',
-}
-
 export default async function DashboardRouter() {
   const cookieStore = cookies()
 
@@ -26,12 +20,18 @@ export default async function DashboardRouter() {
     }
   )
 
+  // ─────────────────────────────────────────────
+  // 1️⃣ Ensure user is authenticated
+  // ─────────────────────────────────────────────
   const { data: { session } } = await supabase.auth.getSession()
 
   if (!session) {
     redirect('/auth/login')
   }
 
+  // ─────────────────────────────────────────────
+  // 2️⃣ Fetch profile
+  // ─────────────────────────────────────────────
   const { data: profile } = await supabase
     .from('profiles')
     .select('role, tenant_id')
@@ -42,15 +42,32 @@ export default async function DashboardRouter() {
     redirect('/auth/login')
   }
 
-  if (profile.role === 'principal' && !profile.tenant_id) {
+  const role = profile.role as UserRole
+
+  // ─────────────────────────────────────────────
+  // 3️⃣ Enforce onboarding for principals
+  // ─────────────────────────────────────────────
+  if (role === 'principal' && !profile.tenant_id) {
     redirect('/workspace/setup/wizard')
   }
 
-  const destination = ROLE_DESTINATIONS[profile.role as UserRole]
-
-  if (!destination) {
-    redirect('/auth/login')
+  // ─────────────────────────────────────────────
+  // 4️⃣ Deterministic routing by role
+  // ─────────────────────────────────────────────
+  if (role === 'principal') {
+    redirect('/b2b/principal')
   }
 
-  redirect(destination)
+  if (role === 'teacher') {
+    redirect('/b2b/teacher')
+  }
+
+  if (role === 'student') {
+    redirect('/b2c')
+  }
+
+  // ─────────────────────────────────────────────
+  // 5️⃣ Fallback (should never happen)
+  // ─────────────────────────────────────────────
+  redirect('/auth/login')
 }

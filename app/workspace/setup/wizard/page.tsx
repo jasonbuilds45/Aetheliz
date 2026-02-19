@@ -595,7 +595,7 @@ export default function SetupWizard() {
                   )}
                 </div>
                 <button
-                  onClick={() => router.replace('/workspace/router')}
+                  onClick={() => router.replace('/dashboard')}
                   className="mt-10 inline-flex items-center gap-2 bg-primary text-white font-bold px-8 py-4 rounded-xl hover:bg-primary-800 transition-all shadow-lg shadow-primary/25 text-base"
                 >
                   Go to my dashboard

@@ -37,8 +37,6 @@ export default function RegisterPage() {
       return
     }
 
-    // 🔥 IMPORTANT: If email confirmation is enabled,
-    // Supabase will NOT create a session immediately.
     if (!data.user) {
       setError("Registration failed. Please try again.")
       setLoading(false)
@@ -61,21 +59,28 @@ export default function RegisterPage() {
       return
     }
 
-    // ✅ If email confirmation is enabled, session may be null
+    // If email confirmation is enabled, user must login manually
     if (!data.session) {
       setLoading(false)
       router.push("/auth/login")
       return
     }
 
-    // Normal flow (auto-login after signup)
-    router.push("/dashboard")
-router.refresh()
+    // 🔥 Clean institutional flow enforcement
+    if (role === "principal") {
+      router.push("/workspace/setup/wizard")
+    } else {
+      router.push("/dashboard")
+    }
+
+    router.refresh()
     setLoading(false)
   }
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
+
+      {/* Left panel */}
       <div className="hidden lg:flex lg:w-1/2 bg-primary flex-col justify-between p-12 relative overflow-hidden">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff08_1px,transparent_1px),linear-gradient(to_bottom,#ffffff08_1px,transparent_1px)] bg-[size:40px_40px]" />
         <Link href="/" className="relative flex items-center gap-2.5">
@@ -93,8 +98,10 @@ router.refresh()
         </p>
       </div>
 
+      {/* Right panel */}
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-md">
+
           <div className="mb-8">
             <h1 className="text-3xl font-black text-slate-900 tracking-tight">
               Create your account
@@ -104,7 +111,26 @@ router.refresh()
             </p>
           </div>
 
+          {/* Account type selector */}
+          <div className="grid grid-cols-2 gap-3 mb-6 p-1 bg-slate-100 rounded-xl">
+            {(["student", "institution"] as AccountType[]).map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setAccountType(type)}
+                className={`py-2.5 rounded-lg text-sm font-bold transition-all ${
+                  accountType === type
+                    ? "bg-white text-primary shadow-sm border border-slate-200"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {type === "student" ? "Student" : "Institution"}
+              </button>
+            ))}
+          </div>
+
           <form onSubmit={handleRegister} className="space-y-5">
+
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
                 Full name
@@ -167,6 +193,7 @@ router.refresh()
               Sign in
             </Link>
           </p>
+
         </div>
       </div>
     </div>
