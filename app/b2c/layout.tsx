@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { WorkspaceShell } from '@/components/layout/WorkspaceShell'
 
 export default async function B2CLayout({ children }: { children: React.ReactNode }) {
-  const cookieStore = await cookies()
+  const cookieStore = cookies()
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

@@ -10,7 +10,7 @@ const ROLE_DESTINATIONS: Record<UserRole, string> = {
 }
 
 export default async function DashboardRouter() {
-  const cookieStore = await cookies()
+  const cookieStore = cookies()
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
