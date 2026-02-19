@@ -19,7 +19,10 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
 
     if (error) {
       setError(error.message)
@@ -27,10 +30,9 @@ export default function LoginPage() {
       return
     }
 
-    // Wait for auth state to propagate, then do a full page refresh
-    // This ensures middleware sees the session and routes correctly
-    await new Promise(resolve => setTimeout(resolve, 500))
-    window.location.href = "/workspace/router"
+    // ✅ Let Next.js handle navigation (no hard reload)
+    router.push("/workspace/router")
+    router.refresh()
   }
 
   return (
@@ -48,7 +50,9 @@ export default function LoginPage() {
           <blockquote className="text-white/90 text-xl font-medium leading-relaxed mb-6 italic">
             &ldquo;Aetheliz gave us a window into how our students actually think — not just what they score.&rdquo;
           </blockquote>
-          <p className="text-white/60 text-sm font-semibold">Dr. Patricia Osei · Academic Director, Westbridge Academy</p>
+          <p className="text-white/60 text-sm font-semibold">
+            Dr. Patricia Osei · Academic Director, Westbridge Academy
+          </p>
         </div>
         <div className="relative flex gap-8">
           <div>
@@ -69,22 +73,28 @@ export default function LoginPage() {
       {/* Right panel */}
       <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-md">
-          {/* Mobile logo */}
           <Link href="/" className="lg:hidden flex items-center gap-2 mb-8">
             <div className="size-8 bg-primary rounded-lg flex items-center justify-center">
               <span className="material-symbols-outlined text-white text-lg">analytics</span>
             </div>
-            <span className="text-lg font-black text-primary uppercase italic tracking-tight">Aetheliz</span>
+            <span className="text-lg font-black text-primary uppercase italic tracking-tight">
+              Aetheliz
+            </span>
           </Link>
 
           <div className="mb-8">
-            <h1 className="text-3xl font-black text-slate-900 tracking-tight">Welcome back</h1>
+            <h1 className="text-3xl font-black text-slate-900 tracking-tight">
+              Welcome back
+            </h1>
             <p className="text-slate-500 mt-2">Sign in to your workspace</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label htmlFor="email" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+              <label
+                htmlFor="email"
+                className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5"
+              >
                 Email address
               </label>
               <input
@@ -102,7 +112,10 @@ export default function LoginPage() {
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label htmlFor="password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <label
+                  htmlFor="password"
+                  className="block text-xs font-bold text-slate-500 uppercase tracking-wider"
+                >
                   Password
                 </label>
               </div>
@@ -121,7 +134,9 @@ export default function LoginPage() {
 
             {error && (
               <div className="flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
-                <span className="material-symbols-outlined text-lg shrink-0 mt-0.5">error</span>
+                <span className="material-symbols-outlined text-lg shrink-0 mt-0.5">
+                  error
+                </span>
                 {error}
               </div>
             )}
@@ -133,13 +148,17 @@ export default function LoginPage() {
             >
               {loading ? (
                 <>
-                  <span className="material-symbols-outlined text-xl animate-spin">refresh</span>
+                  <span className="material-symbols-outlined text-xl animate-spin">
+                    refresh
+                  </span>
                   Signing in…
                 </>
               ) : (
                 <>
                   Sign in
-                  <span className="material-symbols-outlined text-xl">arrow_forward</span>
+                  <span className="material-symbols-outlined text-xl">
+                    arrow_forward
+                  </span>
                 </>
               )}
             </button>
@@ -147,13 +166,19 @@ export default function LoginPage() {
 
           <p className="mt-8 text-center text-sm text-slate-500">
             Don&apos;t have an account?{" "}
-            <Link href="/auth/register" className="text-primary font-bold hover:underline">
+            <Link
+              href="/auth/register"
+              className="text-primary font-bold hover:underline"
+            >
               Create one free
             </Link>
           </p>
 
           <p className="mt-4 text-center">
-            <Link href="/" className="text-xs text-slate-400 hover:text-slate-600 transition-colors">
+            <Link
+              href="/"
+              className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
+            >
               ← Back to home
             </Link>
           </p>

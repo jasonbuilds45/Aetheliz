@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export default async function WorkspaceRouter() {
-  const cookieStore = await cookies()
+  const cookieStore = cookies()
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -29,7 +29,9 @@ export default async function WorkspaceRouter() {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // ✅ Use getSession instead of getUser (fixes Vercel auth loop)
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user
 
   if (!user) {
     redirect('/auth/login')
@@ -45,6 +47,7 @@ export default async function WorkspaceRouter() {
     redirect('/auth/login')
   }
 
+  // Institution onboarding check
   if (profile.role === 'principal' && !profile.tenant_id) {
     redirect('/workspace/setup/wizard')
   }
