@@ -47,13 +47,27 @@ export default async function DashboardRouter() {
   const role = profile.role as UserRole
 
   // ─────────────────────────────────────────────
-  // 3️⃣ Principal onboarding enforcement
+  // 3️⃣ Principal enforcement (structure + strategy)
   // ─────────────────────────────────────────────
   if (role === 'principal') {
+
+    // 🔹 Must complete structural wizard first
     if (!profile.tenant_id) {
       redirect('/workspace/setup/wizard')
     }
 
+    // 🔹 Must complete strategic calibration
+    const { data: tenantSettings } = await supabase
+      .from('tenant_settings')
+      .select('tenant_id')
+      .eq('tenant_id', profile.tenant_id)
+      .maybeSingle()
+
+    if (!tenantSettings) {
+      redirect('/b2b/onboarding-strategy')
+    }
+
+    // ✅ Fully calibrated principal
     redirect('/b2b/principal')
   }
 
