@@ -44,14 +44,16 @@ export default function RegisterPage() {
     }
 
     // Create profile
-    const { error: profileError } = await supabase.from("profiles").insert({
-      id: data.user.id,
-      email: data.user.email,
-      full_name: fullName,
-      role,
-      institution_id: null,
-      tenant_id: null,
-    })
+    const { error: profileError } = await supabase
+  .from("profiles")
+  .upsert({
+    id: data.user.id,
+    email: data.user.email,
+    full_name: fullName,
+    role,
+    institution_id: null,
+    tenant_id: null,
+  }, { onConflict: "id" })
 
     if (profileError) {
       setError(`Profile setup failed: ${profileError.message}`)
