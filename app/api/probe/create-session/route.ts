@@ -42,9 +42,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // 🔥 IMPORTANT FIX — derive origin dynamically
+    const origin = req.nextUrl.origin
+
     // 2️⃣ Call Architect to build DAG
     const architectRes = await fetch(
-      `${process.env.NEXT_PUBLIC_BASE_URL}/api/architect`,
+      `${origin}/api/architect`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -65,7 +68,7 @@ export async function POST(req: NextRequest) {
 
     // 3️⃣ Generate Hybrid Probes
     const probeRes = await fetch(
-      `${process.env.NEXT_PUBLIC_BASE_URL}/api/probe/generate`,
+      `${origin}/api/probe/generate`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -87,16 +90,18 @@ export async function POST(req: NextRequest) {
     // 4️⃣ Create Session
     const sessionId = randomUUID()
 
-    const { error } = await supabase.from("probe_sessions").insert({
-      id: sessionId,
-      user_id: user.id,
-      status: "in_progress",
-      metadata: {
-        topic,
-        graph,
-        probes
-      }
-    })
+    const { error } = await supabase
+      .from("probe_sessions")
+      .insert({
+        id: sessionId,
+        user_id: user.id,
+        status: "in_progress",
+        metadata: {
+          topic,
+          graph,
+          probes
+        }
+      })
 
     if (error) {
       throw new Error(error.message)
@@ -105,6 +110,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       session_id: sessionId
     })
+
   } catch (error: any) {
     return NextResponse.json(
       { error: error.message || "Session creation failed" },
