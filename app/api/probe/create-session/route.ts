@@ -3,9 +3,60 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { randomUUID } from "crypto"
 
+/* ------------------------------
+   DAG VALIDATION
+--------------------------------*/
+
+function validateGraph(graph: any) {
+  if (!Array.isArray(graph) || graph.length === 0) return false
+
+  const ids = new Set<string>()
+
+  for (const node of graph) {
+    if (!node.id || !node.name) return false
+    if (ids.has(node.id)) return false
+    ids.add(node.id)
+  }
+
+  for (const node of graph) {
+    if (node.prerequisites) {
+      if (!Array.isArray(node.prerequisites)) return false
+      for (const dep of node.prerequisites) {
+        if (!ids.has(dep)) return false
+      }
+    }
+  }
+
+  return true
+}
+
+/* ------------------------------
+   PROBE VALIDATION
+--------------------------------*/
+
+function validateProbes(probes: any, graph: any[]) {
+  if (!Array.isArray(probes)) return false
+  if (probes.length !== graph.length) return false
+
+  const nodeIds = new Set(graph.map((n) => n.id))
+
+  for (const probe of probes) {
+    if (!probe.node_id || !nodeIds.has(probe.node_id)) return false
+    if (!Array.isArray(probe.mcqs) || probe.mcqs.length === 0) return false
+    if (!probe.explanation_question) return false
+  }
+
+  return true
+}
+
+/* ------------------------------
+   ROUTE HANDLER
+--------------------------------*/
+
 export async function POST(req: NextRequest) {
   try {
-    const { topic } = await req.json()
+    const body = await req.json()
+    const topic = body?.topic
 
     if (!topic) {
       return NextResponse.json(
@@ -42,52 +93,92 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // 🔥 IMPORTANT FIX — derive origin dynamically
+    // 2️⃣ Derive origin dynamically
     const origin = req.nextUrl.origin
 
-    // 2️⃣ Call Architect to build DAG
-    const architectRes = await fetch(
-      `${origin}/api/architect`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          topic,
-          education_stage: "Undergraduate"
-        })
-      }
-    )
+    /* -----------------------------------
+       ARCHITECT CALL
+    ------------------------------------*/
 
-    const architectData = await architectRes.json()
+    const architectRes = await fetch(`${origin}/api/architect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic,
+        education_stage: "Undergraduate"
+      })
+    })
+
+    let architectData: any
+
+    try {
+      architectData = await architectRes.json()
+    } catch {
+      throw new Error("Architect returned invalid JSON")
+    }
 
     if (!architectRes.ok) {
-      throw new Error(architectData.error || "Architect failed")
+      throw new Error(architectData?.error || "Architect failed")
     }
 
-    const graph = architectData.graph
+    const graph = architectData?.graph
 
-    // 3️⃣ Generate Hybrid Probes
-    const probeRes = await fetch(
-      `${origin}/api/probe/generate`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          topic,
-          nodes: graph
-        })
-      }
-    )
+    if (!validateGraph(graph)) {
+      throw new Error("Invalid DAG structure from Architect")
+    }
 
-    const probeData = await probeRes.json()
+    /* -----------------------------------
+       PROBE GENERATION
+    ------------------------------------*/
+
+    const probeRes = await fetch(`${origin}/api/probe/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic,
+        nodes: graph
+      })
+    })
+
+    let probeData: any
+
+    try {
+      probeData = await probeRes.json()
+    } catch {
+      throw new Error("Probe generator returned invalid JSON")
+    }
 
     if (!probeRes.ok) {
-      throw new Error(probeData.error || "Probe generation failed")
+      throw new Error(probeData?.error || "Probe generation failed")
     }
 
-    const probes = probeData.probes
+    const probes = probeData?.probes
 
-    // 4️⃣ Create Session
+    if (!validateProbes(probes, graph)) {
+      throw new Error("Invalid probe structure")
+    }
+
+    /* -----------------------------------
+       NORMALIZE STRUCTURE
+    ------------------------------------*/
+
+    const normalizedGraph = graph.map((node: any) => ({
+      id: node.id,
+      name: node.name,
+      description: node.description || "",
+      prerequisites: node.prerequisites || []
+    }))
+
+    const normalizedProbes = probes.map((probe: any) => ({
+      node_id: probe.node_id,
+      mcqs: probe.mcqs,
+      explanation_question: probe.explanation_question
+    }))
+
+    /* -----------------------------------
+       CREATE SESSION
+    ------------------------------------*/
+
     const sessionId = randomUUID()
 
     const { error } = await supabase
@@ -98,8 +189,8 @@ export async function POST(req: NextRequest) {
         status: "in_progress",
         metadata: {
           topic,
-          graph,
-          probes
+          graph: normalizedGraph,
+          probes: normalizedProbes
         }
       })
 

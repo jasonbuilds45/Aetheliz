@@ -2,154 +2,258 @@ import { NextRequest, NextResponse } from "next/server"
 import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 
+type GeminiEval = {
+  node_id: string
+  score: number
+  missing_concepts: string[]
+}
+
 export async function POST(req: NextRequest) {
-  const { session_id, answers } = await req.json()
+  try {
+    const { session_id, answers } = await req.json()
 
-  const cookieStore = cookies()
-
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value
-        },
-        set() {},
-        remove() {}
-      }
+    if (!session_id || !answers) {
+      return NextResponse.json(
+        { error: "Missing parameters" },
+        { status: 400 }
+      )
     }
-  )
 
-  const { data: session } = await supabase
-    .from("probe_sessions")
-    .select("*")
-    .eq("id", session_id)
-    .single()
+    const cookieStore = cookies()
 
-  if (!session) {
-    return NextResponse.json({ error: "Session not found" }, { status: 404 })
-  }
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value
+          },
+          set() {},
+          remove() {}
+        }
+      }
+    )
 
-  const probes = session.metadata?.probes || []
-  const nodeResults = []
+    // 🔐 Get current user
+    const {
+      data: { user }
+    } = await supabase.auth.getUser()
 
-  for (const node of probes) {
-    let mcqScore = 0
-    let explanationScore = 0
-    let missingConcepts: string[] = []
+    if (!user) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      )
+    }
 
-    const mcqCount = node.questions.filter((q: any) => q.type === "mcq").length
-    const shortQuestions = node.questions.filter((q: any) => q.type === "short")
+    // 🔎 Fetch session
+    const { data: session, error: sessionError } = await supabase
+      .from("probe_sessions")
+      .select("*")
+      .eq("id", session_id)
+      .single()
 
-    for (let i = 0; i < node.questions.length; i++) {
-      const q = node.questions[i]
-      const key = `${node.node_id}-${i}`
-      const userAnswer = answers[key]
+    if (sessionError || !session) {
+      return NextResponse.json(
+        { error: "Session not found" },
+        { status: 404 }
+      )
+    }
 
-      if (q.type === "mcq") {
+    if (session.user_id !== user.id) {
+      return NextResponse.json(
+        { error: "Forbidden" },
+        { status: 403 }
+      )
+    }
+
+    if (session.status === "completed") {
+      return NextResponse.json(
+        { error: "Session already completed" },
+        { status: 400 }
+      )
+    }
+
+    const probes = session.metadata?.probes || []
+    if (!Array.isArray(probes) || probes.length === 0) {
+      return NextResponse.json(
+        { error: "Invalid session structure" },
+        { status: 500 }
+      )
+    }
+
+    const nodeResults = []
+
+    // -----------------------------
+    // 1️⃣ MCQ SCORING (LOCAL)
+    // -----------------------------
+
+    const explanationPayload = []
+
+    for (const node of probes) {
+      let mcqScore = 0
+      const mcqs = node.questions.filter((q: any) => q.type === "mcq")
+      const shorts = node.questions.filter((q: any) => q.type === "short")
+
+      mcqs.forEach((q: any, index: number) => {
+        const key = `${node.node_id}-${index}`
+        const userAnswer = answers[key]
         if (userAnswer === q.correct_answer) {
           mcqScore += 1
         }
-      }
+      })
 
-      if (q.type === "short") {
-        // 🔥 AI CONCEPT COVERAGE SCORING
-        const geminiResponse = await fetch(
-          "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-goog-api-key": process.env.GEMINI_API_KEY!
-            },
-            body: JSON.stringify({
-              contents: [
-                {
-                  parts: [
-                    {
-                      text: `
-You are a calibration engine.
+      const mcqRatio = mcqs.length > 0 ? mcqScore / mcqs.length : 0
 
-Node:
-${JSON.stringify(node)}
-
-Student Answer:
-"${userAnswer}"
-
-Evaluate concept coverage against dependencies:
-${JSON.stringify(node.dependencies || [])}
-
-Return ONLY JSON:
-
-{
-  "score": number between 0 and 1,
-  "missing_concepts": ["..."]
-}
-`
-                    }
-                  ]
-                }
-              ]
-            })
-          }
-        )
-
-        const geminiData = await geminiResponse.json()
-        const raw =
-          geminiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
-
-        const cleaned = raw
-          .replace(/```json/g, "")
-          .replace(/```/g, "")
-          .trim()
-
-        try {
-          const parsed = JSON.parse(cleaned)
-          explanationScore += parsed.score || 0
-          missingConcepts = parsed.missing_concepts || []
-        } catch {
-          explanationScore += 0
-        }
-      }
+      explanationPayload.push({
+        node_id: node.node_id,
+        node_name: node.node_name,
+        prerequisites: node.prerequisites || [],
+        student_answer:
+          answers[`${node.node_id}-${mcqs.length}`] || "",
+        mcq_ratio: mcqRatio
+      })
     }
 
-    const shortCount = shortQuestions.length
-    const totalWeight = mcqCount + shortCount
+    // -----------------------------
+    // 2️⃣ BATCH GEMINI EVALUATION
+    // -----------------------------
 
-    const nodeScore =
-      totalWeight > 0
-        ? (mcqScore + explanationScore) / totalWeight
-        : 0
+    const geminiResponse = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": process.env.GEMINI_API_KEY!
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `
+You are a structural calibration engine.
 
-    let classification = "Stable"
-    if (nodeScore < 0.4) classification = "Broken"
-    else if (nodeScore < 0.8) classification = "Weak"
+Evaluate conceptual coverage for each node.
 
-    nodeResults.push({
-      node_id: node.node_id,
-      node_name: node.node_name,
-      score: nodeScore,
-      classification,
-      missing_concepts: missingConcepts
-    })
+Data:
+${JSON.stringify(explanationPayload)}
+
+For each node return:
+
+[
+  {
+    "node_id": "n1",
+    "score": number between 0 and 1,
+    "missing_concepts": ["..."]
   }
+]
 
-  const overall =
-    nodeResults.reduce((sum, n) => sum + n.score, 0) /
-    (nodeResults.length || 1)
+STRICT:
+- No extra text
+- Return ONLY JSON array
+`
+                }
+              ]
+            }
+          ]
+        })
+      }
+    )
 
-  await supabase
-    .from("probe_sessions")
-    .update({
-      stability_score: overall,
-      metadata: {
-        ...session.metadata,
-        results: nodeResults
-      },
-      status: "completed"
+    if (!geminiResponse.ok) {
+      return NextResponse.json(
+        { error: "Gemini evaluation failed" },
+        { status: 500 }
+      )
+    }
+
+    let geminiData
+    try {
+      geminiData = await geminiResponse.json()
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid Gemini response" },
+        { status: 500 }
+      )
+    }
+
+    const raw =
+      geminiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
+
+    const cleaned = raw
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim()
+
+    let parsed: GeminiEval[]
+    try {
+      parsed = JSON.parse(cleaned)
+    } catch {
+      return NextResponse.json(
+        { error: "Malformed Gemini evaluation JSON" },
+        { status: 500 }
+      )
+    }
+
+    // -----------------------------
+    // 3️⃣ FINAL SCORING
+    // Weight model:
+    // MCQ = 0.4
+    // Explanation = 0.6
+    // -----------------------------
+
+    parsed.forEach((evalNode) => {
+      const local = explanationPayload.find(
+        (n) => n.node_id === evalNode.node_id
+      )
+
+      if (!local) return
+
+      const finalScore =
+        local.mcq_ratio * 0.4 +
+        (evalNode.score || 0) * 0.6
+
+      let classification = "Stable"
+      if (finalScore < 0.4) classification = "Broken"
+      else if (finalScore < 0.8) classification = "Weak"
+
+      nodeResults.push({
+        node_id: evalNode.node_id,
+        node_name: local.node_name,
+        score: finalScore,
+        classification,
+        missing_concepts: evalNode.missing_concepts || []
+      })
     })
-    .eq("id", session_id)
 
-  return NextResponse.json({ success: true })
+    const overall =
+      nodeResults.reduce((sum, n) => sum + n.score, 0) /
+      (nodeResults.length || 1)
+
+    await supabase
+      .from("probe_sessions")
+      .update({
+        stability_score: overall,
+        metadata: {
+          ...session.metadata,
+          results: nodeResults
+        },
+        status: "completed"
+      })
+      .eq("id", session_id)
+
+    return NextResponse.json({
+      success: true,
+      overall_stability: overall
+    })
+
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: error.message || "Submission failed" },
+      { status: 500 }
+    )
+  }
 }
