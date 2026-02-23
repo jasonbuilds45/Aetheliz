@@ -3,65 +3,21 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import { randomUUID } from "crypto"
 
-/* ------------------------------
-   DAG VALIDATION
---------------------------------*/
-
-function validateGraph(graph: any) {
-  if (!Array.isArray(graph) || graph.length === 0) return false
-
-  const ids = new Set<string>()
-
-  for (const node of graph) {
-    if (!node.id || !node.name) return false
-    if (ids.has(node.id)) return false
-    ids.add(node.id)
-  }
-
-  for (const node of graph) {
-    if (node.prerequisites) {
-      if (!Array.isArray(node.prerequisites)) return false
-      for (const dep of node.prerequisites) {
-        if (!ids.has(dep)) return false
-      }
-    }
-  }
-
-  return true
-}
-
-/* ------------------------------
-   PROBE VALIDATION
---------------------------------*/
-
-function validateProbes(probes: any, graph: any[]) {
-  if (!Array.isArray(probes)) return false
-  if (probes.length !== graph.length) return false
-
-  const nodeIds = new Set(graph.map((n) => n.id))
-
-  for (const probe of probes) {
-    if (!probe.node_id || !nodeIds.has(probe.node_id)) return false
-    if (!Array.isArray(probe.mcqs) || probe.mcqs.length === 0) return false
-    if (!probe.explanation_question) return false
-  }
-
-  return true
-}
-
-/* ------------------------------
-   ROUTE HANDLER
---------------------------------*/
-
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    const topic = body?.topic
+    const { topic } = await req.json()
 
     if (!topic) {
       return NextResponse.json(
         { error: "Topic is required" },
         { status: 400 }
+      )
+    }
+
+    if (!process.env.NEXT_PUBLIC_BASE_URL) {
+      return NextResponse.json(
+        { error: "NEXT_PUBLIC_BASE_URL missing in environment" },
+        { status: 500 }
       )
     }
 
@@ -81,7 +37,7 @@ export async function POST(req: NextRequest) {
       }
     )
 
-    // 1️⃣ Get current user
+    // 🔐 Get user
     const {
       data: { user }
     } = await supabase.auth.getUser()
@@ -93,91 +49,101 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // 2️⃣ Derive origin dynamically
-    const origin = req.nextUrl.origin
+    // ---------------------------------
+    // 1️⃣ CALL ARCHITECT
+    // ---------------------------------
 
-    /* -----------------------------------
-       ARCHITECT CALL
-    ------------------------------------*/
-
-    const architectRes = await fetch(`${origin}/api/architect`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        topic,
-        education_stage: "Undergraduate"
-      })
-    })
-
-    let architectData: any
-
-    try {
-      architectData = await architectRes.json()
-    } catch {
-      throw new Error("Architect returned invalid JSON")
-    }
+    const architectRes = await fetch(
+      `${process.env.NEXT_PUBLIC_BASE_URL}/api/architect`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic,
+          education_stage: "Undergraduate"
+        })
+      }
+    )
 
     if (!architectRes.ok) {
-      throw new Error(architectData?.error || "Architect failed")
+      const errorText = await architectRes.text()
+      console.error("Architect failed:", errorText)
+
+      return NextResponse.json(
+        { error: "Architect failed" },
+        { status: 500 }
+      )
     }
 
-    const graph = architectData?.graph
-
-    if (!validateGraph(graph)) {
-      throw new Error("Invalid DAG structure from Architect")
-    }
-
-    /* -----------------------------------
-       PROBE GENERATION
-    ------------------------------------*/
-
-    const probeRes = await fetch(`${origin}/api/probe/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        topic,
-        nodes: graph
-      })
-    })
-
-    let probeData: any
-
+    let architectData: any
     try {
-      probeData = await probeRes.json()
-    } catch {
-      throw new Error("Probe generator returned invalid JSON")
+      architectData = await architectRes.json()
+    } catch (e) {
+      console.error("Architect JSON parse error:", e)
+      return NextResponse.json(
+        { error: "Architect returned invalid JSON" },
+        { status: 500 }
+      )
     }
+
+    const graph = architectData.graph
+
+    if (!graph || !Array.isArray(graph)) {
+      return NextResponse.json(
+        { error: "Architect returned invalid graph structure" },
+        { status: 500 }
+      )
+    }
+
+    // ---------------------------------
+    // 2️⃣ GENERATE PROBES
+    // ---------------------------------
+
+    const probeRes = await fetch(
+      `${process.env.NEXT_PUBLIC_BASE_URL}/api/probe/generate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic,
+          nodes: graph
+        })
+      }
+    )
 
     if (!probeRes.ok) {
-      throw new Error(probeData?.error || "Probe generation failed")
+      const errorText = await probeRes.text()
+      console.error("Probe generation failed:", errorText)
+
+      return NextResponse.json(
+        { error: "Probe generation failed" },
+        { status: 500 }
+      )
     }
 
-    const probes = probeData?.probes
-
-    if (!validateProbes(probes, graph)) {
-      throw new Error("Invalid probe structure")
+    let probeData: any
+    try {
+      probeData = await probeRes.json()
+    } catch (e) {
+      console.error("Probe JSON parse error:", e)
+      return NextResponse.json(
+        { error: "Probe returned invalid JSON" },
+        { status: 500 }
+      )
     }
 
-    /* -----------------------------------
-       NORMALIZE STRUCTURE
-    ------------------------------------*/
+    const probes = probeData.probes
 
-    const normalizedGraph = graph.map((node: any) => ({
-      id: node.id,
-      name: node.name,
-      description: node.description || "",
-      prerequisites: node.prerequisites || []
-    }))
+    if (!probes || !Array.isArray(probes)) {
+      return NextResponse.json(
+        { error: "Invalid probe structure" },
+        { status: 500 }
+      )
+    }
 
-    const normalizedProbes = probes.map((probe: any) => ({
-      node_id: probe.node_id,
-      mcqs: probe.mcqs,
-      explanation_question: probe.explanation_question
-    }))
-
-    /* -----------------------------------
-       CREATE SESSION
-    ------------------------------------*/
+    // ---------------------------------
+    // 3️⃣ CREATE SESSION
+    // ---------------------------------
 
     const sessionId = randomUUID()
 
@@ -189,22 +155,28 @@ export async function POST(req: NextRequest) {
         status: "in_progress",
         metadata: {
           topic,
-          graph: normalizedGraph,
-          probes: normalizedProbes
+          graph,
+          probes
         }
       })
 
     if (error) {
-      throw new Error(error.message)
+      console.error("Session insert error:", error)
+      return NextResponse.json(
+        { error: "Failed to create session" },
+        { status: 500 }
+      )
     }
 
     return NextResponse.json({
       session_id: sessionId
     })
 
-  } catch (error: any) {
+  } catch (error) {
+    console.error("Create session fatal error:", error)
+
     return NextResponse.json(
-      { error: error.message || "Session creation failed" },
+      { error: "Session creation failed" },
       { status: 500 }
     )
   }
