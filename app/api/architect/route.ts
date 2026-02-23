@@ -193,7 +193,7 @@ Rules:
       .replace(/```/g, "")
       .trim()
 
-    let parsed
+    let parsed: any
     try {
       parsed = JSON.parse(cleaned)
     } catch {

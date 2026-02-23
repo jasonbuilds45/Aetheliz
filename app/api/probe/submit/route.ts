@@ -83,7 +83,13 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const nodeResults = []
+    const nodeResults: {
+  node_id: string
+  node_name: string
+  score: number
+  classification: "Stable" | "Weak" | "Broken"
+  missing_concepts: string[]
+}[] = []
 
     // -----------------------------
     // 1️⃣ MCQ SCORING (LOCAL)
