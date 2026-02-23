@@ -230,8 +230,11 @@ Rules:
     console.error("Architect fatal error:", error)
 
     return NextResponse.json(
-      { error: "Architect generation failed" },
-      { status: 500 }
-    )
+  {
+    error: "Architect generation failed",
+    details: String(error)
+  },
+  { status: 500 }
+)
   }
 }
