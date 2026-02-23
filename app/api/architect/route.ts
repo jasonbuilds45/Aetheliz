@@ -83,7 +83,10 @@ export async function POST(req: NextRequest) {
     const { topic, education_stage } = await req.json()
 
     if (!topic || !education_stage) {
-      return NextResponse.json({ error: "Missing parameters" }, { status: 400 })
+      return NextResponse.json(
+        { error: "Missing parameters" },
+        { status: 400 }
+      )
     }
 
     if (
@@ -131,49 +134,76 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // 🔥 OpenAI structured call
+    // 🔥 OpenAI call (stable)
     const response = await openai.responses.create({
       model: "gpt-4o-mini",
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "dag_schema",
-          schema: {
-            type: "object",
-            properties: {
-              nodes: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    id: { type: "string" },
-                    name: { type: "string" },
-                    description: { type: "string" },
-                    prerequisites: {
-                      type: "array",
-                      items: { type: "string" }
-                    }
-                  },
-                  required: ["id", "name", "prerequisites"]
-                }
-              }
-            },
-            required: ["nodes"]
-          }
-        }
-      },
-      input: `
+      input: [
+        {
+          role: "system",
+          content: `
 You are a curriculum decomposition engine.
 
+Return ONLY valid JSON.
+No markdown.
+No backticks.
+No explanations.
+Only JSON.
+`
+        },
+        {
+          role: "user",
+          content: `
 Decompose "${topic}" for level "${education_stage}".
 
-Return a DAG of atomic conceptual units.
-Maximum 10 nodes.
-Directed acyclic structure.
+Return format:
+
+{
+  "nodes": [
+    {
+      "id": "x",
+      "name": "Concept",
+      "description": "Short explanation",
+      "prerequisites": []
+    }
+  ]
+}
+
+Rules:
+- Atomic conceptual units
+- Directed acyclic graph
+- Maximum 10 nodes
 `
+        }
+      ]
     })
 
-    const parsed = JSON.parse(response.output_text)
+    const rawText = response.output_text
+
+    if (!rawText) {
+      return NextResponse.json(
+        { error: "OpenAI returned empty response" },
+        { status: 500 }
+      )
+    }
+
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/)
+
+    if (!jsonMatch) {
+      return NextResponse.json(
+        { error: "No JSON found in OpenAI output" },
+        { status: 500 }
+      )
+    }
+
+    let parsed: any
+    try {
+      parsed = JSON.parse(jsonMatch[0])
+    } catch {
+      return NextResponse.json(
+        { error: "Malformed JSON from OpenAI" },
+        { status: 500 }
+      )
+    }
 
     const normalized = validateAndNormalizeGraph(parsed.nodes)
 
