@@ -14,9 +14,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const baseUrl =
-      process.env.NEXT_PUBLIC_SITE_URL ||
-      req.nextUrl.origin
+    const baseUrl = req.nextUrl.origin
 
     const cookieStore = cookies()
 
