@@ -14,12 +14,9 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    if (!process.env.NEXT_PUBLIC_BASE_URL) {
-      return NextResponse.json(
-        { error: "NEXT_PUBLIC_BASE_URL missing in environment" },
-        { status: 500 }
-      )
-    }
+    const baseUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      req.nextUrl.origin
 
     const cookieStore = cookies()
 
@@ -54,7 +51,7 @@ export async function POST(req: NextRequest) {
     // ---------------------------------
 
     const architectRes = await fetch(
-      `${process.env.NEXT_PUBLIC_BASE_URL}/api/architect`,
+      `${baseUrl}/api/architect`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -100,7 +97,7 @@ export async function POST(req: NextRequest) {
     // ---------------------------------
 
     const probeRes = await fetch(
-      `${process.env.NEXT_PUBLIC_BASE_URL}/api/probe/generate`,
+      `${baseUrl}/api/probe/generate`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
