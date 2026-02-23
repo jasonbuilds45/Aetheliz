@@ -187,21 +187,26 @@ Rules:
 
     const raw =
       geminiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
+      console.log("Gemini RAW output:", raw)
 
-    const cleaned = raw
-      .replace(/```json/g, "")
-      .replace(/```/g, "")
-      .trim()
+    const jsonMatch = raw.match(/\{[\s\S]*\}/)
 
-    let parsed: any
-    try {
-      parsed = JSON.parse(cleaned)
-    } catch {
-      return NextResponse.json(
-        { error: "Malformed DAG JSON" },
-        { status: 500 }
-      )
-    }
+if (!jsonMatch) {
+  return NextResponse.json(
+    { error: "No valid JSON object found in Gemini output" },
+    { status: 500 }
+  )
+}
+
+let parsed
+try {
+  parsed = JSON.parse(jsonMatch[0])
+} catch {
+  return NextResponse.json(
+    { error: "Malformed DAG JSON" },
+    { status: 500 }
+  )
+}
 
     const normalized = validateAndNormalizeGraph(parsed.nodes)
 
