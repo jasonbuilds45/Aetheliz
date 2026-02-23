@@ -1,43 +1,82 @@
-'use client';
+'use client'
 
-import React from 'react';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
+import React from 'react'
+import { Button } from '@/components/ui/Button'
 
 export default function B2CDashboard() {
   return (
-    <div className="space-y-8">
+    <div className="space-y-12">
       <div className="flex justify-between items-end">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900 dark:text-white uppercase tracking-tighter italic">Your Progress</h1>
-          <p className="text-slate-500">Self-guided structural diagnostic profile</p>
+          <h1 className="text-2xl font-semibold tracking-wide">
+            Progress Overview
+          </h1>
+          <p className="text-neutral-500 text-sm mt-1">
+            Structural stability across diagnosed topics
+          </p>
         </div>
-        <Button variant="primary">Start New Probe</Button>
+
+        <Button variant="primary">Run Diagnostic</Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="bg-gradient-to-br from-primary to-primary-800 text-white border-none shadow-xl">
-          <p className="text-xs font-bold uppercase opacity-70 mb-1">Knowledge Stability</p>
-          <h3 className="text-4xl font-black mb-4">74%</h3>
-          <div className="w-full bg-white/20 h-2 rounded-full overflow-hidden">
-            <div className="bg-white h-full" style={{ width: '74%' }}></div>
-          </div>
-        </Card>
+      {/* Stability Card */}
+      <div className="border border-neutral-800 bg-neutral-900 p-8">
+        <p className="text-xs uppercase tracking-widest text-neutral-500 mb-2">
+          Overall Stability
+        </p>
+        <h2 className="text-5xl font-light text-cyan-400">74%</h2>
 
-        <Card className="md:col-span-2">
-          <h3 className="font-bold mb-4 text-slate-800 dark:text-white uppercase text-xs tracking-widest">Recent Diagnostics</h3>
-          <div className="space-y-4">
-            <div className="flex justify-between items-center p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-800">
-              <span className="font-bold text-sm">Organic Chemistry Fundamentals</span>
-              <span className="text-emerald-600 font-black text-lg">88%</span>
-            </div>
-            <div className="flex justify-between items-center p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-800">
-              <span className="font-bold text-sm">Thermodynamics II</span>
-              <span className="text-rose-500 font-black text-lg">42%</span>
-            </div>
-          </div>
-        </Card>
+        <div className="mt-6 h-1 w-full bg-neutral-800">
+          <div
+            className="h-1 bg-cyan-400 transition-all duration-500"
+            style={{ width: '74%' }}
+          />
+        </div>
+      </div>
+
+      {/* Recent Diagnostics */}
+      <div className="border border-neutral-800 bg-neutral-900 p-8">
+        <h3 className="text-xs uppercase tracking-widest text-neutral-500 mb-6">
+          Recent Diagnostics
+        </h3>
+
+        <div className="space-y-4">
+          <DiagnosticRow
+            title="Organic Chemistry Fundamentals"
+            score="88%"
+            status="stable"
+          />
+          <DiagnosticRow
+            title="Thermodynamics II"
+            score="42%"
+            status="broken"
+          />
+        </div>
       </div>
     </div>
-  );
+  )
+}
+
+function DiagnosticRow({
+  title,
+  score,
+  status,
+}: {
+  title: string
+  score: string
+  status: 'stable' | 'weak' | 'broken'
+}) {
+  const color =
+    status === 'stable'
+      ? 'text-emerald-400'
+      : status === 'weak'
+      ? 'text-yellow-400'
+      : 'text-rose-400'
+
+  return (
+    <div className="flex justify-between items-center border border-neutral-800 px-4 py-3 hover:bg-neutral-800 transition-colors duration-150">
+      <span className="text-sm text-neutral-200">{title}</span>
+      <span className={`text-lg font-light ${color}`}>{score}</span>
+    </div>
+  )
 }

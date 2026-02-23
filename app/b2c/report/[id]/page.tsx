@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 
 type NodeResult = {
   node_id: string
@@ -11,23 +11,14 @@ type NodeResult = {
   missing_concepts: string[]
 }
 
-type RepairData = {
-  explanation: string
-  example: string
-  check_question: string
-}
-
 export default function ReportPage() {
   const { id } = useParams()
+  const router = useRouter()
 
   const [topic, setTopic] = useState("")
   const [results, setResults] = useState<NodeResult[]>([])
   const [overall, setOverall] = useState(0)
   const [loading, setLoading] = useState(true)
-
-  const [repairData, setRepairData] = useState<Record<string, RepairData>>({})
-  const [loadingRepair, setLoadingRepair] = useState<string | null>(null)
-
   const [history, setHistory] = useState<Record<string, number[]>>({})
 
   useEffect(() => {
@@ -44,29 +35,6 @@ export default function ReportPage() {
     setLoading(false)
   }
 
-  const initiateRepair = async (node: NodeResult) => {
-    setLoadingRepair(node.node_id)
-
-    const res = await fetch("/api/probe/repair", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        topic,
-        node_name: node.node_name,
-        missing_concepts: node.missing_concepts
-      })
-    })
-
-    const data = await res.json()
-
-    setRepairData(prev => ({
-      ...prev,
-      [node.node_id]: data
-    }))
-
-    setLoadingRepair(null)
-  }
-
   const loadHistory = async (nodeId: string) => {
     const res = await fetch(`/api/probe/history?node_id=${nodeId}`)
     const data = await res.json()
@@ -79,8 +47,8 @@ export default function ReportPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background-light">
-        <p className="text-slate-600 tracking-wide">
+      <div className="flex items-center justify-center py-40">
+        <p className="text-neutral-500 text-sm tracking-wide">
           Generating Structural Report...
         </p>
       </div>
@@ -89,78 +57,85 @@ export default function ReportPage() {
 
   const percentage = Math.round(overall * 100)
 
+  const overallColor =
+    percentage >= 80
+      ? "text-emerald-400"
+      : percentage >= 40
+      ? "text-amber-400"
+      : "text-rose-400"
+
   return (
-    <div className="min-h-screen bg-background-light">
+    <div className="space-y-14">
 
       {/* Header */}
-      <div className="border-b bg-white">
-        <div className="max-w-6xl mx-auto px-10 py-6 flex justify-between items-center">
-          <div>
-            <h1 className="text-xl font-semibold tracking-wide">
-              STRUCTURAL DIAGNOSTIC REPORT
-            </h1>
-            <p className="text-sm text-slate-500 mt-1">
-              Topic: {topic}
-            </p>
-          </div>
+      <div className="border-b border-neutral-800 pb-8 flex justify-between items-center">
+        <div>
+          <h1 className="text-lg uppercase tracking-widest text-neutral-400">
+            Structural Diagnostic Report
+          </h1>
+          <p className="text-sm text-neutral-500 mt-2">
+            Topic: {topic}
+          </p>
+        </div>
 
-          <div className="text-right">
-            <p className="text-xs text-slate-500 uppercase tracking-wider">
-              Overall Stability
-            </p>
-            <p className="text-2xl font-semibold">
-              {percentage}%
-            </p>
-          </div>
+        <div className="text-right">
+          <p className="text-xs uppercase tracking-wider text-neutral-500">
+            Overall Stability
+          </p>
+          <p className={`text-4xl font-light ${overallColor}`}>
+            {percentage}%
+          </p>
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-10 py-12 space-y-10">
+      {/* Node Results */}
+      {results.map((node) => {
+        const nodePercent = Math.round(node.score * 100)
 
-        {results.map((node) => (
+        const classificationColor =
+          node.classification === "Stable"
+            ? "text-emerald-400"
+            : node.classification === "Weak"
+            ? "text-amber-400"
+            : "text-rose-400"
+
+        return (
           <div
             key={node.node_id}
-            className="bg-white border border-slate-200 p-8 space-y-6"
+            className="border border-neutral-800 bg-neutral-900 p-8 space-y-6"
           >
             {/* Node Header */}
-            <div className="flex justify-between items-center border-b pb-4">
-              <h2 className="text-lg font-semibold tracking-wide">
+            <div className="flex justify-between items-center border-b border-neutral-800 pb-4">
+              <h2 className="text-base text-neutral-200">
                 {node.node_name}
               </h2>
 
               <div className="text-right">
-                <p className="text-xs uppercase tracking-wider text-slate-500">
+                <p className="text-xs uppercase tracking-wider text-neutral-500">
                   Stability
                 </p>
-                <p className="font-semibold">
-                  {Math.round(node.score * 100)}%
+                <p className="text-xl font-light text-cyan-400">
+                  {nodePercent}%
                 </p>
               </div>
             </div>
 
             {/* Classification */}
-            <span
-              className={`text-sm uppercase tracking-wider font-semibold
-                ${node.classification === "Stable" ? "text-emerald-600" : ""}
-                ${node.classification === "Weak" ? "text-amber-600" : ""}
-                ${node.classification === "Broken" ? "text-red-600" : ""}
-              `}
-            >
+            <div className={`text-xs uppercase tracking-widest font-semibold ${classificationColor}`}>
               {node.classification}
-            </span>
+            </div>
 
-            {/* Trend Button */}
+            {/* Trend */}
             <div>
               <button
                 onClick={() => loadHistory(node.node_id)}
-                className="text-xs underline text-slate-500"
+                className="text-xs text-neutral-500 hover:text-cyan-400 transition"
               >
                 View Stability Trend
               </button>
 
               {history[node.node_id] && (
-                <div className="text-sm text-slate-600 mt-2">
-                  Trend:{" "}
+                <div className="text-xs text-neutral-400 mt-3">
                   {history[node.node_id]
                     .map(v => Math.round(v * 100) + "%")
                     .join(" → ")}
@@ -168,51 +143,30 @@ export default function ReportPage() {
               )}
             </div>
 
-            {/* Repair Section */}
+            {/* Repair Workspace Entry */}
             {node.classification !== "Stable" && (
-              <div className="space-y-6">
-
+              <div className="pt-4 border-t border-neutral-800">
                 <button
-                  onClick={() => initiateRepair(node)}
-                  className="px-6 py-2 border border-slate-300 text-sm uppercase tracking-wider hover:bg-slate-100 transition"
+                  onClick={() =>
+                    router.push(
+                      `/b2c/repair/${node.node_id}?topic=${encodeURIComponent(
+                        topic
+                      )}&node=${encodeURIComponent(
+                        node.node_name
+                      )}&missing=${encodeURIComponent(
+                        node.missing_concepts.join(",")
+                      )}`
+                    )
+                  }
+                  className="px-6 py-2 border border-cyan-400 text-cyan-400 text-xs uppercase tracking-wider hover:bg-cyan-400 hover:text-neutral-950 transition"
                 >
-                  {loadingRepair === node.node_id
-                    ? "Generating Repair..."
-                    : "Initiate Structural Repair"}
+                  Enter Repair Workspace
                 </button>
-
-                {repairData[node.node_id] && (
-                  <div className="bg-slate-50 border border-slate-200 p-6 space-y-4">
-                    <div>
-                      <p className="font-semibold">Focused Explanation</p>
-                      <p className="text-sm text-slate-700 mt-2">
-                        {repairData[node.node_id].explanation}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="font-semibold">Worked Example</p>
-                      <p className="text-sm text-slate-700 mt-2">
-                        {repairData[node.node_id].example}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="font-semibold">Verification Question</p>
-                      <p className="text-sm text-slate-700 mt-2">
-                        {repairData[node.node_id].check_question}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
               </div>
             )}
-
           </div>
-        ))}
-
-      </div>
+        )
+      })}
     </div>
   )
 }
