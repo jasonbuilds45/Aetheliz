@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import crypto from "crypto"
+import OpenAI from "openai"
 
 type NodeType = {
   id: string
@@ -10,6 +11,10 @@ type NodeType = {
   prerequisites?: string[]
 }
 
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+})
+
 function validateAndNormalizeGraph(nodes: any[]): NodeType[] | null {
   if (!Array.isArray(nodes) || nodes.length === 0) return null
   if (nodes.length > 10) return null
@@ -17,7 +22,6 @@ function validateAndNormalizeGraph(nodes: any[]): NodeType[] | null {
   const normalized: NodeType[] = []
   const idMap = new Map<string, string>()
 
-  // Reindex deterministically
   nodes.forEach((node, index) => {
     if (!node?.id || !node?.name) return
 
@@ -32,7 +36,6 @@ function validateAndNormalizeGraph(nodes: any[]): NodeType[] | null {
     })
   })
 
-  // Remap prerequisites
   nodes.forEach((node, index) => {
     const prereqs = Array.isArray(node?.prerequisites)
       ? node.prerequisites
@@ -43,14 +46,10 @@ function validateAndNormalizeGraph(nodes: any[]): NodeType[] | null {
       .filter(Boolean) as string[]
   })
 
-  // Prevent self dependency
   for (const node of normalized) {
-    if (node.prerequisites?.includes(node.id)) {
-      return null
-    }
+    if (node.prerequisites?.includes(node.id)) return null
   }
 
-  // Detect cycles
   const visited = new Set<string>()
   const stack = new Set<string>()
 
@@ -84,17 +83,13 @@ export async function POST(req: NextRequest) {
     const { topic, education_stage } = await req.json()
 
     if (!topic || !education_stage) {
-      return NextResponse.json(
-        { error: "Missing parameters" },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: "Missing parameters" }, { status: 400 })
     }
 
-    // 🔒 Environment validation
     if (
       !process.env.NEXT_PUBLIC_SUPABASE_URL ||
       !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-      !process.env.GEMINI_API_KEY
+      !process.env.OPENAI_API_KEY
     ) {
       return NextResponse.json(
         { error: "Server environment variables missing" },
@@ -123,16 +118,11 @@ export async function POST(req: NextRequest) {
       .update(`${topic.toLowerCase()}::${education_stage}`)
       .digest("hex")
 
-    // ✅ Safe cache lookup (no crash if not found)
-    const { data: cached, error: cacheError } = await supabase
+    const { data: cached } = await supabase
       .from("topic_graphs")
       .select("nodes")
       .eq("hash", hash)
       .maybeSingle()
-
-    if (cacheError) {
-      console.error("Cache error:", cacheError)
-    }
 
     if (cached?.nodes) {
       return NextResponse.json({
@@ -141,110 +131,49 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // 🔥 Call Gemini
-    const geminiResponse = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": process.env.GEMINI_API_KEY
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `
+    // 🔥 OpenAI structured call
+    const response = await openai.responses.create({
+      model: "gpt-4o-mini",
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "dag_schema",
+          schema: {
+            type: "object",
+            properties: {
+              nodes: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string" },
+                    name: { type: "string" },
+                    description: { type: "string" },
+                    prerequisites: {
+                      type: "array",
+                      items: { type: "string" }
+                    }
+                  },
+                  required: ["id", "name", "prerequisites"]
+                }
+              }
+            },
+            required: ["nodes"]
+          }
+        }
+      },
+      input: `
 You are a curriculum decomposition engine.
 
 Decompose "${topic}" for level "${education_stage}".
 
-Return ONLY JSON:
-
-{
-  "nodes": [
-    {
-      "id": "x",
-      "name": "Concept",
-      "description": "Short explanation",
-      "prerequisites": []
-    }
-  ]
-}
-
-Rules:
-- Atomic conceptual units
-- Directed acyclic structure
-- Max 10 nodes
-- No extra text
+Return a DAG of atomic conceptual units.
+Maximum 10 nodes.
+Directed acyclic structure.
 `
-                }
-              ]
-            }
-          ]
-        })
-      }
-    )
+    })
 
-    if (!geminiResponse.ok) {
-  const errorText = await geminiResponse.text()
-
-  console.error("Gemini status:", geminiResponse.status)
-  console.error("Gemini error body:", errorText)
-
-  return NextResponse.json(
-    {
-      error: "Gemini API request failed",
-      status: geminiResponse.status,
-      details: errorText
-    },
-    { status: 500 }
-  )
-}
-
-    let geminiData: any
-    try {
-      geminiData = await geminiResponse.json()
-    } catch (e) {
-      console.error("Gemini JSON parse error:", e)
-      return NextResponse.json(
-        { error: "Invalid Gemini response format" },
-        { status: 500 }
-      )
-    }
-
-    const raw =
-      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
-
-    if (!raw) {
-      return NextResponse.json(
-        { error: "Gemini returned empty response" },
-        { status: 500 }
-      )
-    }
-
-    // Extract JSON block safely
-    const jsonMatch = raw.match(/\{[\s\S]*\}/)
-
-    if (!jsonMatch) {
-      console.error("No JSON found in Gemini output:", raw)
-      return NextResponse.json(
-        { error: "No valid JSON object found in Gemini output" },
-        { status: 500 }
-      )
-    }
-
-    let parsed: any
-    try {
-      parsed = JSON.parse(jsonMatch[0])
-    } catch (e) {
-      console.error("Malformed JSON from Gemini:", e)
-      return NextResponse.json(
-        { error: "Malformed DAG JSON" },
-        { status: 500 }
-      )
-    }
+    const parsed = JSON.parse(response.output_text)
 
     const normalized = validateAndNormalizeGraph(parsed.nodes)
 
@@ -255,19 +184,12 @@ Rules:
       )
     }
 
-    // 💾 Cache validated graph (safe insert)
-    const { error: insertError } = await supabase
-      .from("topic_graphs")
-      .insert({
-        topic,
-        education_stage,
-        hash,
-        nodes: normalized
-      })
-
-    if (insertError) {
-      console.error("Cache insert error:", insertError)
-    }
+    await supabase.from("topic_graphs").insert({
+      topic,
+      education_stage,
+      hash,
+      nodes: normalized
+    })
 
     return NextResponse.json({
       source: "generated",
