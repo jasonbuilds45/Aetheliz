@@ -19,6 +19,13 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    if (!process.env.GEMINI_API_KEY) {
+      return NextResponse.json(
+        { error: "GEMINI_API_KEY missing" },
+        { status: 500 }
+      )
+    }
+
     const cookieStore = cookies()
 
     const supabase = createServerClient(
@@ -35,7 +42,6 @@ export async function POST(req: NextRequest) {
       }
     )
 
-    // 🔐 Get current user
     const {
       data: { user }
     } = await supabase.auth.getUser()
@@ -47,7 +53,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // 🔎 Fetch session
     const { data: session, error: sessionError } = await supabase
       .from("probe_sessions")
       .select("*")
@@ -83,30 +88,17 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const nodeResults: {
-  node_id: string
-  node_name: string
-  score: number
-  classification: "Stable" | "Weak" | "Broken"
-  missing_concepts: string[]
-}[] = []
-
-    // -----------------------------
-    // 1️⃣ MCQ SCORING (LOCAL)
-    // -----------------------------
-
     const explanationPayload: {
-  node_id: string
-  node_name: string
-  prerequisites: string[]
-  student_answer: string
-  mcq_ratio: number
-}[] = []
+      node_id: string
+      node_name: string
+      prerequisites: string[]
+      student_answer: string
+      mcq_ratio: number
+    }[] = []
 
     for (const node of probes) {
       let mcqScore = 0
       const mcqs = node.questions.filter((q: any) => q.type === "mcq")
-      const shorts = node.questions.filter((q: any) => q.type === "short")
 
       mcqs.forEach((q: any, index: number) => {
         const key = `${node.node_id}-${index}`
@@ -128,12 +120,9 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // -----------------------------
-    // 2️⃣ BATCH GEMINI EVALUATION
-    // -----------------------------
-
+    // 🔥 Gemini evaluation (stable model)
     const geminiResponse = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
       {
         method: "POST",
         headers: {
@@ -148,12 +137,16 @@ export async function POST(req: NextRequest) {
                   text: `
 You are a structural calibration engine.
 
+Return ONLY valid JSON array.
+No markdown.
+No explanations.
+
 Evaluate conceptual coverage for each node.
 
 Data:
 ${JSON.stringify(explanationPayload)}
 
-For each node return:
+Return:
 
 [
   {
@@ -162,10 +155,6 @@ For each node return:
     "missing_concepts": ["..."]
   }
 ]
-
-STRICT:
-- No extra text
-- Return ONLY JSON array
 `
                 }
               ]
@@ -176,33 +165,41 @@ STRICT:
     )
 
     if (!geminiResponse.ok) {
+      const errorText = await geminiResponse.text()
       return NextResponse.json(
-        { error: "Gemini evaluation failed" },
+        {
+          error: "Gemini evaluation failed",
+          status: geminiResponse.status,
+          details: errorText
+        },
         { status: 500 }
       )
     }
 
-    let geminiData
-    try {
-      geminiData = await geminiResponse.json()
-    } catch {
-      return NextResponse.json(
-        { error: "Invalid Gemini response" },
-        { status: 500 }
-      )
-    }
+    const geminiData = await geminiResponse.json()
 
     const raw =
-      geminiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
+      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
-    const cleaned = raw
-      .replace(/```json/g, "")
-      .replace(/```/g, "")
-      .trim()
+    if (!raw) {
+      return NextResponse.json(
+        { error: "Gemini returned empty evaluation" },
+        { status: 500 }
+      )
+    }
+
+    const jsonMatch = raw.match(/\[[\s\S]*\]/)
+
+    if (!jsonMatch) {
+      return NextResponse.json(
+        { error: "No valid JSON array found in Gemini output" },
+        { status: 500 }
+      )
+    }
 
     let parsed: GeminiEval[]
     try {
-      parsed = JSON.parse(cleaned)
+      parsed = JSON.parse(jsonMatch[0])
     } catch {
       return NextResponse.json(
         { error: "Malformed Gemini evaluation JSON" },
@@ -210,12 +207,13 @@ STRICT:
       )
     }
 
-    // -----------------------------
-    // 3️⃣ FINAL SCORING
-    // Weight model:
-    // MCQ = 0.4
-    // Explanation = 0.6
-    // -----------------------------
+    const nodeResults: {
+      node_id: string
+      node_name: string
+      score: number
+      classification: "Stable" | "Weak" | "Broken"
+      missing_concepts: string[]
+    }[] = []
 
     parsed.forEach((evalNode) => {
       const local = explanationPayload.find(
@@ -230,8 +228,8 @@ STRICT:
 
       let classification: "Stable" | "Weak" | "Broken" = "Stable"
 
-if (finalScore < 0.4) classification = "Broken"
-else if (finalScore < 0.8) classification = "Weak"
+      if (finalScore < 0.4) classification = "Broken"
+      else if (finalScore < 0.8) classification = "Weak"
 
       nodeResults.push({
         node_id: evalNode.node_id,
@@ -246,31 +244,29 @@ else if (finalScore < 0.8) classification = "Weak"
       nodeResults.reduce((sum, n) => sum + n.score, 0) /
       (nodeResults.length || 1)
 
-    // Update session
-await supabase
-  .from("probe_sessions")
-  .update({
-    stability_score: overall,
-    metadata: {
-      ...session.metadata,
-      results: nodeResults
-    },
-    status: "completed"
-  })
-  .eq("id", session_id)
+    await supabase
+      .from("probe_sessions")
+      .update({
+        stability_score: overall,
+        metadata: {
+          ...session.metadata,
+          results: nodeResults
+        },
+        status: "completed"
+      })
+      .eq("id", session_id)
 
-// Insert longitudinal history
-for (const node of nodeResults) {
-  await supabase
-    .from("concept_stability_history")
-    .insert({
-      user_id: user.id,
-      topic: session.metadata?.topic || "",
-      node_id: node.node_id,
-      node_name: node.node_name,
-      stability_score: node.score
-    })
-}
+    for (const node of nodeResults) {
+      await supabase
+        .from("concept_stability_history")
+        .insert({
+          user_id: user.id,
+          topic: session.metadata?.topic || "",
+          node_id: node.node_id,
+          node_name: node.node_name,
+          stability_score: node.score
+        })
+    }
 
     return NextResponse.json({
       success: true,
@@ -279,7 +275,10 @@ for (const node of nodeResults) {
 
   } catch (error: any) {
     return NextResponse.json(
-      { error: error.message || "Submission failed" },
+      {
+        error: "Submission failed",
+        details: String(error)
+      },
       { status: 500 }
     )
   }

@@ -91,13 +91,20 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    if (!process.env.GEMINI_API_KEY) {
+      return NextResponse.json(
+        { error: "GEMINI_API_KEY missing" },
+        { status: 500 }
+      )
+    }
+
     const geminiResponse = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-goog-api-key": process.env.GEMINI_API_KEY!,
+          "x-goog-api-key": process.env.GEMINI_API_KEY!
         },
         body: JSON.stringify({
           contents: [
@@ -106,6 +113,12 @@ export async function POST(req: NextRequest) {
                 {
                   text: `
 You are a structural calibration question generator.
+
+Return ONLY valid JSON.
+No markdown.
+No backticks.
+No explanations.
+Only JSON.
 
 Topic: ${topic}
 
@@ -117,8 +130,8 @@ STRICT RULES:
 - Each MCQ must have 4 options.
 - Provide correct_answer for MCQs.
 - Questions must test conceptual understanding, not memorization.
-- No extra text.
-- Return ONLY valid JSON.
+- Do not skip any node.
+- Return in required format only.
 
 Format:
 
@@ -152,41 +165,49 @@ Format:
               ]
             }
           ]
-        }),
+        })
       }
     )
 
     if (!geminiResponse.ok) {
+      const errorText = await geminiResponse.text()
       return NextResponse.json(
-        { error: "Gemini request failed" },
+        {
+          error: "Gemini API request failed",
+          status: geminiResponse.status,
+          details: errorText
+        },
         { status: 500 }
       )
     }
 
-    let geminiData
-    try {
-      geminiData = await geminiResponse.json()
-    } catch {
-      return NextResponse.json(
-        { error: "Invalid response from Gemini" },
-        { status: 500 }
-      )
-    }
+    const geminiData = await geminiResponse.json()
 
     const rawText =
-      geminiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
+      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
-    const cleaned = rawText
-      .replace(/```json/g, "")
-      .replace(/```/g, "")
-      .trim()
+    if (!rawText) {
+      return NextResponse.json(
+        { error: "Gemini returned empty response" },
+        { status: 500 }
+      )
+    }
+
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/)
+
+    if (!jsonMatch) {
+      return NextResponse.json(
+        { error: "No valid JSON found in Gemini output" },
+        { status: 500 }
+      )
+    }
 
     let parsed: any
     try {
-      parsed = JSON.parse(cleaned)
+      parsed = JSON.parse(jsonMatch[0])
     } catch {
       return NextResponse.json(
-        { error: "Gemini returned malformed JSON" },
+        { error: "Malformed JSON from Gemini" },
         { status: 500 }
       )
     }
@@ -198,7 +219,6 @@ Format:
       )
     }
 
-    // Deterministic normalization: ensure consistent ordering
     parsed.probes.sort((a: Probe, b: Probe) =>
       a.node_id.localeCompare(b.node_id)
     )
@@ -208,8 +228,13 @@ Format:
     })
 
   } catch (error) {
+    console.error("Probe generation fatal error:", error)
+
     return NextResponse.json(
-      { error: "Probe generation failed" },
+      {
+        error: "Probe generation failed",
+        details: String(error)
+      },
       { status: 500 }
     )
   }

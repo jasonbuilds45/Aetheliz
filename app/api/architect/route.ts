@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import crypto from "crypto"
-import OpenAI from "openai"
 
 type NodeType = {
   id: string
@@ -10,10 +9,6 @@ type NodeType = {
   description?: string
   prerequisites?: string[]
 }
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-})
 
 function validateAndNormalizeGraph(nodes: any[]): NodeType[] | null {
   if (!Array.isArray(nodes) || nodes.length === 0) return null
@@ -40,6 +35,8 @@ function validateAndNormalizeGraph(nodes: any[]): NodeType[] | null {
     const prereqs = Array.isArray(node?.prerequisites)
       ? node.prerequisites
       : []
+
+    if (!normalized[index]) return
 
     normalized[index].prerequisites = prereqs
       .map((p: string) => idMap.get(p))
@@ -92,7 +89,7 @@ export async function POST(req: NextRequest) {
     if (
       !process.env.NEXT_PUBLIC_SUPABASE_URL ||
       !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-      !process.env.OPENAI_API_KEY
+      !process.env.GEMINI_API_KEY
     ) {
       return NextResponse.json(
         { error: "Server environment variables missing" },
@@ -134,13 +131,21 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // 🔥 OpenAI call (stable)
-    const response = await openai.responses.create({
-      model: "gpt-4o-mini",
-      input: [
-        {
-          role: "system",
-          content: `
+    // 🔥 Gemini call
+    const geminiResponse = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": process.env.GEMINI_API_KEY!
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `
 You are a curriculum decomposition engine.
 
 Return ONLY valid JSON.
@@ -148,11 +153,7 @@ No markdown.
 No backticks.
 No explanations.
 Only JSON.
-`
-        },
-        {
-          role: "user",
-          content: `
+
 Decompose "${topic}" for level "${education_stage}".
 
 Return format:
@@ -173,24 +174,43 @@ Rules:
 - Directed acyclic graph
 - Maximum 10 nodes
 `
-        }
-      ]
-    })
+                }
+              ]
+            }
+          ]
+        })
+      }
+    )
 
-    const rawText = response.output_text
-
-    if (!rawText) {
+    if (!geminiResponse.ok) {
+      const errorText = await geminiResponse.text()
       return NextResponse.json(
-        { error: "OpenAI returned empty response" },
+        {
+          error: "Gemini API request failed",
+          status: geminiResponse.status,
+          details: errorText
+        },
         { status: 500 }
       )
     }
 
-    const jsonMatch = rawText.match(/\{[\s\S]*\}/)
+    const geminiData = await geminiResponse.json()
+
+    const raw =
+      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
+
+    if (!raw) {
+      return NextResponse.json(
+        { error: "Gemini returned empty response" },
+        { status: 500 }
+      )
+    }
+
+    const jsonMatch = raw.match(/\{[\s\S]*\}/)
 
     if (!jsonMatch) {
       return NextResponse.json(
-        { error: "No JSON found in OpenAI output" },
+        { error: "No valid JSON found in Gemini output" },
         { status: 500 }
       )
     }
@@ -200,7 +220,7 @@ Rules:
       parsed = JSON.parse(jsonMatch[0])
     } catch {
       return NextResponse.json(
-        { error: "Malformed JSON from OpenAI" },
+        { error: "Malformed JSON from Gemini" },
         { status: 500 }
       )
     }
@@ -230,11 +250,11 @@ Rules:
     console.error("Architect fatal error:", error)
 
     return NextResponse.json(
-  {
-    error: "Architect generation failed",
-    details: String(error)
-  },
-  { status: 500 }
-)
+      {
+        error: "Architect generation failed",
+        details: String(error)
+      },
+      { status: 500 }
+    )
   }
 }
