@@ -233,17 +233,31 @@ STRICT:
       nodeResults.reduce((sum, n) => sum + n.score, 0) /
       (nodeResults.length || 1)
 
-    await supabase
-      .from("probe_sessions")
-      .update({
-        stability_score: overall,
-        metadata: {
-          ...session.metadata,
-          results: nodeResults
-        },
-        status: "completed"
-      })
-      .eq("id", session_id)
+    // Update session
+await supabase
+  .from("probe_sessions")
+  .update({
+    stability_score: overall,
+    metadata: {
+      ...session.metadata,
+      results: nodeResults
+    },
+    status: "completed"
+  })
+  .eq("id", session_id)
+
+// Insert longitudinal history
+for (const node of nodeResults) {
+  await supabase
+    .from("concept_stability_history")
+    .insert({
+      user_id: user.id,
+      topic: session.metadata?.topic || "",
+      node_id: node.node_id,
+      node_name: node.node_name,
+      stability_score: node.score
+    })
+}
 
     return NextResponse.json({
       success: true,
