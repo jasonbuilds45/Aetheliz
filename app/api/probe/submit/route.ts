@@ -95,7 +95,13 @@ export async function POST(req: NextRequest) {
     // 1️⃣ MCQ SCORING (LOCAL)
     // -----------------------------
 
-    const explanationPayload = []
+    const explanationPayload: {
+  node_id: string
+  node_name: string
+  prerequisites: string[]
+  student_answer: string
+  mcq_ratio: number
+}[] = []
 
     for (const node of probes) {
       let mcqScore = 0
