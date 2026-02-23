@@ -228,9 +228,10 @@ STRICT:
         local.mcq_ratio * 0.4 +
         (evalNode.score || 0) * 0.6
 
-      let classification = "Stable"
-      if (finalScore < 0.4) classification = "Broken"
-      else if (finalScore < 0.8) classification = "Weak"
+      let classification: "Stable" | "Weak" | "Broken" = "Stable"
+
+if (finalScore < 0.4) classification = "Broken"
+else if (finalScore < 0.8) classification = "Weak"
 
       nodeResults.push({
         node_id: evalNode.node_id,
