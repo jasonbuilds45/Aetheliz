@@ -226,9 +226,11 @@ Rules:
     })
 
   } catch (error) {
-    return NextResponse.json(
-      { error: "Architect generation failed" },
-      { status: 500 }
-    )
+    console.error("Architect error:", error)
+
+return NextResponse.json(
+  { error: String(error) },
+  { status: 500 }
+)
   }
 }
