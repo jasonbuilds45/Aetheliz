@@ -133,7 +133,26 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const probes = probeData.probes
+    const rawProbes = probeData.probes
+
+if (!rawProbes || !Array.isArray(rawProbes)) {
+  return NextResponse.json(
+    { error: "Invalid probe structure" },
+    { status: 500 }
+  )
+}
+
+// Merge node metadata into probes
+const probes = rawProbes.map((probe: any) => {
+  const node = graph.find((n: any) => n.id === probe.node_id)
+
+  return {
+    node_id: probe.node_id,
+    node_name: node?.name || "",
+    prerequisites: node?.prerequisites || [],
+    questions: probe.questions
+  }
+})
 
     if (!probes || !Array.isArray(probes)) {
       return NextResponse.json(
