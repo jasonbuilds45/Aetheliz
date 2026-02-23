@@ -51,16 +51,19 @@ export async function POST(req: NextRequest) {
     // ---------------------------------
 
     const architectRes = await fetch(
-      `${baseUrl}/api/architect`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          topic,
-          education_stage: "Undergraduate"
-        })
-      }
-    )
+  `${baseUrl}/api/architect`,
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      cookie: req.headers.get("cookie") || ""
+    },
+    body: JSON.stringify({
+      topic,
+      education_stage: "Undergraduate"
+    })
+  }
+)
 
     if (!architectRes.ok) {
       const errorText = await architectRes.text()
@@ -100,7 +103,10 @@ export async function POST(req: NextRequest) {
       `${baseUrl}/api/probe/generate`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+  "Content-Type": "application/json",
+  cookie: req.headers.get("cookie") || ""
+},
         body: JSON.stringify({
           topic,
           nodes: graph
