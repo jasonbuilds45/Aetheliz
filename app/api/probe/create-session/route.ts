@@ -70,9 +70,9 @@ export async function POST(req: NextRequest) {
       console.error("Architect failed:", errorText)
 
       return NextResponse.json(
-        { error: "Architect failed" },
-        { status: 500 }
-      )
+  { error: errorText },
+  { status: 500 }
+)
     }
 
     let architectData: any
