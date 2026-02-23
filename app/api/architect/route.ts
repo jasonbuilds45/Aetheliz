@@ -17,37 +17,40 @@ function validateAndNormalizeGraph(nodes: any[]): NodeType[] | null {
   const normalized: NodeType[] = []
   const idMap = new Map<string, string>()
 
-  // Step 1 — Reindex deterministically
+  // Reindex deterministically
   nodes.forEach((node, index) => {
+    if (!node?.id || !node?.name) return
+
     const newId = `n${index + 1}`
     idMap.set(node.id, newId)
 
     normalized.push({
       id: newId,
-      name: node.name?.trim(),
+      name: String(node.name).trim(),
       description: node.description || "",
       prerequisites: []
     })
   })
 
-  // Step 2 — Remap prerequisites
+  // Remap prerequisites
   nodes.forEach((node, index) => {
-    const newId = `n${index + 1}`
-    const prereqs = node.prerequisites || []
+    const prereqs = Array.isArray(node?.prerequisites)
+      ? node.prerequisites
+      : []
 
     normalized[index].prerequisites = prereqs
       .map((p: string) => idMap.get(p))
       .filter(Boolean) as string[]
   })
 
-  // Step 3 — Validate no self dependency
+  // Prevent self dependency
   for (const node of normalized) {
     if (node.prerequisites?.includes(node.id)) {
       return null
     }
   }
 
-  // Step 4 — Detect circular dependencies
+  // Detect cycles
   const visited = new Set<string>()
   const stack = new Set<string>()
 
@@ -87,11 +90,23 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // 🔒 Environment validation
+    if (
+      !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+      !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      !process.env.GEMINI_API_KEY
+    ) {
+      return NextResponse.json(
+        { error: "Server environment variables missing" },
+        { status: 500 }
+      )
+    }
+
     const cookieStore = cookies()
 
     const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
         cookies: {
           get(name: string) {
@@ -108,14 +123,18 @@ export async function POST(req: NextRequest) {
       .update(`${topic.toLowerCase()}::${education_stage}`)
       .digest("hex")
 
-    // 🔎 Check cache
-    const { data: cached } = await supabase
+    // ✅ Safe cache lookup (no crash if not found)
+    const { data: cached, error: cacheError } = await supabase
       .from("topic_graphs")
-      .select("*")
+      .select("nodes")
       .eq("hash", hash)
-      .single()
+      .maybeSingle()
 
-    if (cached) {
+    if (cacheError) {
+      console.error("Cache error:", cacheError)
+    }
+
+    if (cached?.nodes) {
       return NextResponse.json({
         source: "cache",
         graph: cached.nodes
@@ -129,7 +148,7 @@ export async function POST(req: NextRequest) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-goog-api-key": process.env.GEMINI_API_KEY!
+          "x-goog-api-key": process.env.GEMINI_API_KEY
         },
         body: JSON.stringify({
           contents: [
@@ -169,44 +188,57 @@ Rules:
     )
 
     if (!geminiResponse.ok) {
+      const errorText = await geminiResponse.text()
+      console.error("Gemini HTTP error:", errorText)
+
       return NextResponse.json(
-        { error: "Gemini failed" },
+        { error: "Gemini API request failed" },
         { status: 500 }
       )
     }
 
-    let geminiData
+    let geminiData: any
     try {
       geminiData = await geminiResponse.json()
-    } catch {
+    } catch (e) {
+      console.error("Gemini JSON parse error:", e)
       return NextResponse.json(
-        { error: "Invalid Gemini response" },
+        { error: "Invalid Gemini response format" },
         { status: 500 }
       )
     }
 
     const raw =
-      geminiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
-      console.log("Gemini RAW output:", raw)
+      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
+    if (!raw) {
+      return NextResponse.json(
+        { error: "Gemini returned empty response" },
+        { status: 500 }
+      )
+    }
+
+    // Extract JSON block safely
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
 
-if (!jsonMatch) {
-  return NextResponse.json(
-    { error: "No valid JSON object found in Gemini output" },
-    { status: 500 }
-  )
-}
+    if (!jsonMatch) {
+      console.error("No JSON found in Gemini output:", raw)
+      return NextResponse.json(
+        { error: "No valid JSON object found in Gemini output" },
+        { status: 500 }
+      )
+    }
 
-let parsed
-try {
-  parsed = JSON.parse(jsonMatch[0])
-} catch {
-  return NextResponse.json(
-    { error: "Malformed DAG JSON" },
-    { status: 500 }
-  )
-}
+    let parsed: any
+    try {
+      parsed = JSON.parse(jsonMatch[0])
+    } catch (e) {
+      console.error("Malformed JSON from Gemini:", e)
+      return NextResponse.json(
+        { error: "Malformed DAG JSON" },
+        { status: 500 }
+      )
+    }
 
     const normalized = validateAndNormalizeGraph(parsed.nodes)
 
@@ -217,13 +249,19 @@ try {
       )
     }
 
-    // 💾 Cache validated graph
-    await supabase.from("topic_graphs").insert({
-      topic,
-      education_stage,
-      hash,
-      nodes: normalized
-    })
+    // 💾 Cache validated graph (safe insert)
+    const { error: insertError } = await supabase
+      .from("topic_graphs")
+      .insert({
+        topic,
+        education_stage,
+        hash,
+        nodes: normalized
+      })
+
+    if (insertError) {
+      console.error("Cache insert error:", insertError)
+    }
 
     return NextResponse.json({
       source: "generated",
@@ -231,11 +269,11 @@ try {
     })
 
   } catch (error) {
-    console.error("Architect error:", error)
+    console.error("Architect fatal error:", error)
 
-return NextResponse.json(
-  { error: String(error) },
-  { status: 500 }
-)
+    return NextResponse.json(
+      { error: "Architect generation failed" },
+      { status: 500 }
+    )
   }
 }
