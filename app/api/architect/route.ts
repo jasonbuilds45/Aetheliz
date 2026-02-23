@@ -188,14 +188,20 @@ Rules:
     )
 
     if (!geminiResponse.ok) {
-      const errorText = await geminiResponse.text()
-      console.error("Gemini HTTP error:", errorText)
+  const errorText = await geminiResponse.text()
 
-      return NextResponse.json(
-        { error: "Gemini API request failed" },
-        { status: 500 }
-      )
-    }
+  console.error("Gemini status:", geminiResponse.status)
+  console.error("Gemini error body:", errorText)
+
+  return NextResponse.json(
+    {
+      error: "Gemini API request failed",
+      status: geminiResponse.status,
+      details: errorText
+    },
+    { status: 500 }
+  )
+}
 
     let geminiData: any
     try {
