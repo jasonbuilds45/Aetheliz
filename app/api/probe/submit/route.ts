@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // 🔥 Gemini evaluation (stable model)
+    // 🔥 Gemini evaluation
     const geminiResponse = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
       {
@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
             {
               parts: [
                 {
-                  text: 
+                  text: `
 You are an academic concept evaluator.
 
 Return ONLY valid JSON array.
@@ -164,26 +164,6 @@ Scoring guidance:
 - 0.8 - 1.0 = strong conceptual understanding
 - 0.4 - 0.79 = partial understanding
 - 0 - 0.39 = weak understanding
-`
-
-Return ONLY valid JSON array.
-No markdown.
-No explanations.
-
-Evaluate conceptual coverage for each node.
-
-Data:
-${JSON.stringify(explanationPayload)}
-
-Return:
-
-[
-  {
-    "node_id": "n1",
-    "score": number between 0 and 1,
-    "missing_concepts": ["..."]
-  }
-]
 `
                 }
               ]
