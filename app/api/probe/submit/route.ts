@@ -135,7 +135,37 @@ export async function POST(req: NextRequest) {
               parts: [
                 {
                   text: `
-You are a structural calibration engine.
+text: `
+You are an academic concept evaluator.
+
+Return ONLY valid JSON array.
+No markdown.
+No explanations.
+
+Evaluate the student's conceptual understanding for each topic component.
+
+Use:
+- MCQ ratio (objective correctness)
+- Written explanation (depth, clarity, correctness)
+
+Data:
+${JSON.stringify(explanationPayload)}
+
+Return:
+
+[
+  {
+    "node_id": "n1",
+    "score": number between 0 and 1,
+    "missing_concepts": ["..."]
+  }
+]
+
+Scoring guidance:
+- 0.8 - 1.0 = strong conceptual understanding
+- 0.4 - 0.79 = partial understanding
+- 0 - 0.39 = weak understanding
+`
 
 Return ONLY valid JSON array.
 No markdown.

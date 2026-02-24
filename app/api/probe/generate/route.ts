@@ -28,7 +28,6 @@ function validateNodes(nodes: any): nodes is NodeType[] {
   if (!Array.isArray(nodes) || nodes.length === 0) return false
 
   const ids = new Set<string>()
-
   for (const node of nodes) {
     if (!node.id || !node.name) return false
     if (ids.has(node.id)) return false
@@ -73,11 +72,43 @@ function validateProbes(probes: any, nodes: NodeType[]): probes is Probe[] {
   return true
 }
 
+function getDifficultyInstruction(confidence: number) {
+  if (confidence <= 2) {
+    return `
+Difficulty Level: Foundational.
+
+- Focus on core definitions and basic understanding.
+- Avoid edge cases.
+- Ensure clarity over complexity.
+- Questions should check whether the student understands essential meaning.
+`
+  }
+
+  if (confidence === 3) {
+    return `
+Difficulty Level: Intermediate.
+
+- Include application-based reasoning.
+- Test cause-effect relationships.
+- Include moderate conceptual integration.
+`
+  }
+
+  return `
+Difficulty Level: Advanced.
+
+- Include edge cases and misconception traps.
+- Require mechanism-level reasoning.
+- Test deeper conceptual relationships.
+- Avoid surface-level recall questions.
+`
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const { topic, nodes } = await req.json()
+    const { topic, nodes, confidence } = await req.json()
 
-    if (!topic || !nodes) {
+    if (!topic || !nodes || confidence == null) {
       return NextResponse.json(
         { error: "Missing parameters" },
         { status: 400 }
@@ -98,6 +129,8 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const difficultyInstruction = getDifficultyInstruction(confidence)
+
     const geminiResponse = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
       {
@@ -112,15 +145,15 @@ export async function POST(req: NextRequest) {
               parts: [
                 {
                   text: `
-You are a structural calibration question generator.
+You are an academic assessment question generator.
 
 Return ONLY valid JSON.
 No markdown.
-No backticks.
 No explanations.
-Only JSON.
 
 Topic: ${topic}
+
+${difficultyInstruction}
 
 Nodes:
 ${JSON.stringify(nodes)}
@@ -128,10 +161,10 @@ ${JSON.stringify(nodes)}
 STRICT RULES:
 - Generate exactly 2 MCQs and 1 short explanation question per node.
 - Each MCQ must have 4 options.
-- Provide correct_answer for MCQs.
-- Questions must test conceptual understanding, not memorization.
+- Provide correct_answer.
+- Questions must test conceptual understanding.
+- Avoid trivial memorization questions.
 - Do not skip any node.
-- Return in required format only.
 
 Format:
 
@@ -228,8 +261,6 @@ Format:
     })
 
   } catch (error) {
-    console.error("Probe generation fatal error:", error)
-
     return NextResponse.json(
       {
         error: "Probe generation failed",

@@ -5,17 +5,23 @@ import { randomUUID } from "crypto"
 
 export async function POST(req: NextRequest) {
   try {
-    const { topic } = await req.json()
+    const { topic, confidence } = await req.json()
 
-    if (!topic) {
+    if (!topic || confidence == null) {
       return NextResponse.json(
-        { error: "Topic is required" },
+        { error: "Topic and confidence are required" },
+        { status: 400 }
+      )
+    }
+
+    if (confidence < 1 || confidence > 5) {
+      return NextResponse.json(
+        { error: "Invalid confidence level" },
         { status: 400 }
       )
     }
 
     const baseUrl = req.nextUrl.origin
-
     const cookieStore = cookies()
 
     const supabase = createServerClient(
@@ -32,7 +38,6 @@ export async function POST(req: NextRequest) {
       }
     )
 
-    // 🔐 Get user
     const {
       data: { user }
     } = await supabase.auth.getUser()
@@ -44,126 +49,79 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ---------------------------------
     // 1️⃣ CALL ARCHITECT
-    // ---------------------------------
 
-    const architectRes = await fetch(
-  `${baseUrl}/api/architect`,
-  {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      cookie: req.headers.get("cookie") || ""
-    },
-    body: JSON.stringify({
-      topic,
-      education_stage: "Undergraduate"
+    const architectRes = await fetch(`${baseUrl}/api/architect`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        cookie: req.headers.get("cookie") || ""
+      },
+      body: JSON.stringify({
+        topic,
+        education_stage: "Undergraduate"
+      })
     })
-  }
-)
 
     if (!architectRes.ok) {
       const errorText = await architectRes.text()
-      console.error("Architect failed:", errorText)
-
-      return NextResponse.json(
-  { error: errorText },
-  { status: 500 }
-)
+      return NextResponse.json({ error: errorText }, { status: 500 })
     }
 
-    let architectData: any
-    try {
-      architectData = await architectRes.json()
-    } catch (e) {
-      console.error("Architect JSON parse error:", e)
-      return NextResponse.json(
-        { error: "Architect returned invalid JSON" },
-        { status: 500 }
-      )
-    }
-
+    const architectData = await architectRes.json()
     const graph = architectData.graph
 
     if (!graph || !Array.isArray(graph)) {
       return NextResponse.json(
-        { error: "Architect returned invalid graph structure" },
+        { error: "Invalid graph structure" },
         { status: 500 }
       )
     }
 
-    // ---------------------------------
-    // 2️⃣ GENERATE PROBES
-    // ---------------------------------
+    // 2️⃣ GENERATE PROBES (confidence-aware)
 
-    const probeRes = await fetch(
-      `${baseUrl}/api/probe/generate`,
-      {
-        method: "POST",
-        headers: {
-  "Content-Type": "application/json",
-  cookie: req.headers.get("cookie") || ""
-},
-        body: JSON.stringify({
-          topic,
-          nodes: graph
-        })
-      }
-    )
+    const probeRes = await fetch(`${baseUrl}/api/probe/generate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        cookie: req.headers.get("cookie") || ""
+      },
+      body: JSON.stringify({
+        topic,
+        confidence,
+        nodes: graph
+      })
+    })
 
     if (!probeRes.ok) {
-      const errorText = await probeRes.text()
-      console.error("Probe generation failed:", errorText)
-
       return NextResponse.json(
         { error: "Probe generation failed" },
         { status: 500 }
       )
     }
 
-    let probeData: any
-    try {
-      probeData = await probeRes.json()
-    } catch (e) {
-      console.error("Probe JSON parse error:", e)
-      return NextResponse.json(
-        { error: "Probe returned invalid JSON" },
-        { status: 500 }
-      )
-    }
-
+    const probeData = await probeRes.json()
     const rawProbes = probeData.probes
 
-if (!rawProbes || !Array.isArray(rawProbes)) {
-  return NextResponse.json(
-    { error: "Invalid probe structure" },
-    { status: 500 }
-  )
-}
-
-// Merge node metadata into probes
-const probes = rawProbes.map((probe: any) => {
-  const node = graph.find((n: any) => n.id === probe.node_id)
-
-  return {
-    node_id: probe.node_id,
-    node_name: node?.name || "",
-    prerequisites: node?.prerequisites || [],
-    questions: probe.questions
-  }
-})
-
-    if (!probes || !Array.isArray(probes)) {
+    if (!rawProbes || !Array.isArray(rawProbes)) {
       return NextResponse.json(
         { error: "Invalid probe structure" },
         { status: 500 }
       )
     }
 
-    // ---------------------------------
+    const probes = rawProbes.map((probe: any) => {
+      const node = graph.find((n: any) => n.id === probe.node_id)
+
+      return {
+        node_id: probe.node_id,
+        node_name: node?.name || "",
+        prerequisites: node?.prerequisites || [],
+        questions: probe.questions
+      }
+    })
+
     // 3️⃣ CREATE SESSION
-    // ---------------------------------
 
     const sessionId = randomUUID()
 
@@ -175,13 +133,13 @@ const probes = rawProbes.map((probe: any) => {
         status: "in_progress",
         metadata: {
           topic,
+          confidence,
           graph,
           probes
         }
       })
 
     if (error) {
-      console.error("Session insert error:", error)
       return NextResponse.json(
         { error: "Failed to create session" },
         { status: 500 }
@@ -193,8 +151,6 @@ const probes = rawProbes.map((probe: any) => {
     })
 
   } catch (error) {
-    console.error("Create session fatal error:", error)
-
     return NextResponse.json(
       { error: "Session creation failed" },
       { status: 500 }
