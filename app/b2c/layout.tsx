@@ -2,7 +2,6 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
 import React from 'react'
 
 export default async function B2CLayout({
@@ -26,13 +25,8 @@ export default async function B2CLayout({
     }
   )
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-
-  if (!session) {
-    redirect('/auth/login')
-  }
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) redirect('/auth/login')
 
   const { data: profile } = await supabase
     .from('profiles')
@@ -40,25 +34,23 @@ export default async function B2CLayout({
     .eq('id', session.user.id)
     .maybeSingle()
 
-  if (!profile) {
-    redirect('/auth/login')
-  }
+  if (!profile) redirect('/auth/login')
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex">
-      {/* Sidebar */}
-      <aside className="w-60 bg-neutral-900 border-r border-neutral-800 flex flex-col justify-between">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex font-sans">
+      {/* Sidebar - Clean White with Border */}
+      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col justify-between">
         <div>
-          <div className="px-6 py-6 border-b border-neutral-800">
-            <h1 className="text-sm tracking-widest uppercase text-neutral-400">
+          <div className="px-8 py-8">
+            <h1 className="text-sm font-black tracking-[0.2em] uppercase text-indigo-600">
               Aetheliz
             </h1>
-            <p className="text-xs text-cyan-400 mt-1">
-              Cognitive Console
+            <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">
+              Student Workspace
             </p>
           </div>
 
-          <nav className="mt-6 flex flex-col space-y-1 px-3">
+          <nav className="mt-2 flex flex-col space-y-1 px-4">
             <NavItem href="/b2c" label="Progress" />
             <NavItem href="/b2c/diagnose" label="Diagnose" />
             <NavItem href="/b2c/architect" label="Architect" />
@@ -67,20 +59,20 @@ export default async function B2CLayout({
           </nav>
         </div>
 
-        <div className="px-6 py-4 border-t border-neutral-800 text-xs text-neutral-500">
+        <div className="px-8 py-6 border-t border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider">
           {profile.full_name || profile.email}
         </div>
       </aside>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col">
-        <header className="h-16 border-b border-neutral-800 flex items-center justify-between px-8">
-          <h2 className="text-sm uppercase tracking-widest text-neutral-400">
-            Student Interface
+        <header className="h-20 bg-white border-b border-slate-200 flex items-center justify-between px-10">
+          <h2 className="text-xs font-black uppercase tracking-widest text-slate-500">
+            Current Module
           </h2>
-          <span className="text-xs text-neutral-500">
+          <div className="px-4 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-bold uppercase tracking-widest">
             Role: {profile.role}
-          </span>
+          </div>
         </header>
 
         <main className="p-10">{children}</main>
@@ -93,7 +85,7 @@ function NavItem({ href, label }: { href: string; label: string }) {
   return (
     <Link
       href={href}
-      className="px-3 py-2 text-sm text-neutral-400 hover:text-cyan-400 hover:bg-neutral-800 transition-colors duration-150 border-l-2 border-transparent hover:border-cyan-400"
+      className="px-4 py-3 text-sm font-bold text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 transition-all duration-200 rounded-xl border-l-4 border-transparent hover:border-indigo-600"
     >
       {label}
     </Link>
