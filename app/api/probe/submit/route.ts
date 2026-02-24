@@ -47,10 +47,7 @@ export async function POST(req: NextRequest) {
     } = await supabase.auth.getUser()
 
     if (!user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      )
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     const { data: session, error: sessionError } = await supabase
@@ -67,10 +64,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (session.user_id !== user.id) {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 }
-      )
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
     if (session.status === "completed") {
@@ -88,6 +82,10 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // ---------------------------
+    // Prepare evaluation payload
+    // ---------------------------
+
     const explanationPayload: {
       node_id: string
       node_name: string
@@ -102,8 +100,7 @@ export async function POST(req: NextRequest) {
 
       mcqs.forEach((q: any, index: number) => {
         const key = `${node.node_id}-${index}`
-        const userAnswer = answers[key]
-        if (userAnswer === q.correct_answer) {
+        if (answers[key] === q.correct_answer) {
           mcqScore += 1
         }
       })
@@ -120,7 +117,10 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // 🔥 Gemini evaluation
+    // ---------------------------
+    // Gemini evaluation
+    // ---------------------------
+
     const geminiResponse = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
       {
@@ -141,11 +141,7 @@ Return ONLY valid JSON array.
 No markdown.
 No explanations.
 
-Evaluate the student's conceptual understanding for each topic component.
-
-Use:
-- MCQ ratio (objective correctness)
-- Written explanation (depth, clarity, correctness)
+Evaluate the student's conceptual understanding.
 
 Data:
 ${JSON.stringify(explanationPayload)}
@@ -159,11 +155,6 @@ Return:
     "missing_concepts": ["..."]
   }
 ]
-
-Scoring guidance:
-- 0.8 - 1.0 = strong conceptual understanding
-- 0.4 - 0.79 = partial understanding
-- 0 - 0.39 = weak understanding
 `
                 }
               ]
@@ -176,11 +167,7 @@ Scoring guidance:
     if (!geminiResponse.ok) {
       const errorText = await geminiResponse.text()
       return NextResponse.json(
-        {
-          error: "Gemini evaluation failed",
-          status: geminiResponse.status,
-          details: errorText
-        },
+        { error: "Gemini evaluation failed", details: errorText },
         { status: 500 }
       )
     }
@@ -190,91 +177,90 @@ Scoring guidance:
     const raw =
       geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
-    if (!raw) {
-      return NextResponse.json(
-        { error: "Gemini returned empty evaluation" },
-        { status: 500 }
-      )
-    }
-
     const jsonMatch = raw.match(/\[[\s\S]*\]/)
 
     if (!jsonMatch) {
       return NextResponse.json(
-        { error: "No valid JSON array found in Gemini output" },
+        { error: "Invalid Gemini JSON output" },
         { status: 500 }
       )
     }
 
     let parsed: GeminiEval[]
+
     try {
       parsed = JSON.parse(jsonMatch[0])
     } catch {
       return NextResponse.json(
-        { error: "Malformed Gemini evaluation JSON" },
+        { error: "Malformed Gemini JSON" },
         { status: 500 }
       )
     }
 
-    const nodeResults: {
-      node_id: string
-      node_name: string
-      score: number
-      classification: "Stable" | "Weak" | "Broken"
-      missing_concepts: string[]
-    }[] = []
+    // ---------------------------
+    // Compute final scores
+    // ---------------------------
 
-    parsed.forEach((evalNode) => {
+    const nodeResults = parsed.map((evalNode) => {
       const local = explanationPayload.find(
         (n) => n.node_id === evalNode.node_id
       )
 
-      if (!local) return
-
       const finalScore =
-        local.mcq_ratio * 0.4 +
+        (local?.mcq_ratio || 0) * 0.4 +
         (evalNode.score || 0) * 0.6
 
       let classification: "Stable" | "Weak" | "Broken" = "Stable"
-
       if (finalScore < 0.4) classification = "Broken"
       else if (finalScore < 0.8) classification = "Weak"
 
-      nodeResults.push({
+      return {
         node_id: evalNode.node_id,
-        node_name: local.node_name,
+        node_name: local?.node_name || "",
         score: finalScore,
         classification,
         missing_concepts: evalNode.missing_concepts || []
-      })
+      }
     })
 
     const overall =
       nodeResults.reduce((sum, n) => sum + n.score, 0) /
       (nodeResults.length || 1)
 
-    await supabase
+    // ---------------------------
+    // UPDATE SESSION (CRITICAL FIX)
+    // ---------------------------
+
+    const { error: updateError } = await supabase
       .from("probe_sessions")
       .update({
         stability_score: overall,
+        completed_at: new Date().toISOString(),
+        status: "completed",
         metadata: {
           ...session.metadata,
           results: nodeResults
-        },
-        status: "completed"
+        }
       })
       .eq("id", session_id)
 
+    if (updateError) {
+      console.error("Session update failed:", updateError)
+      return NextResponse.json(
+        { error: "Failed to finalize session" },
+        { status: 500 }
+      )
+    }
+
+    // Insert history
     for (const node of nodeResults) {
-      await supabase
-        .from("concept_stability_history")
-        .insert({
-          user_id: user.id,
-          topic: session.metadata?.topic || "",
-          node_id: node.node_id,
-          node_name: node.node_name,
-          stability_score: node.score
-        })
+      await supabase.from("concept_stability_history").insert({
+        user_id: user.id,
+        topic: session.metadata?.topic || "",
+        node_id: node.node_id,
+        node_name: node.node_name,
+        stability_score: node.score
+      })
     }
 
     return NextResponse.json({
@@ -284,10 +270,7 @@ Scoring guidance:
 
   } catch (error: any) {
     return NextResponse.json(
-      {
-        error: "Submission failed",
-        details: String(error)
-      },
+      { error: "Submission failed", details: String(error) },
       { status: 500 }
     )
   }
