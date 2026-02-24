@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
       }
     )
 
-    // 1️⃣ Auth
+    // 1️⃣ Authenticate
     const {
       data: { user }
     } = await supabase.auth.getUser()
@@ -42,20 +42,26 @@ export async function GET(req: NextRequest) {
 
     if (!profile.tenant_id) {
       return NextResponse.json({
-        overview: null,
+        overview: {
+          class_name: "Your Class",
+          average_stability: 0,
+          total_students: 0,
+          active_sessions: 0
+        },
         weak_concepts: [],
         at_risk_students: []
       })
     }
 
-    // 3️⃣ Get students in tenant
-    const { data: students } = await supabase
+    // 3️⃣ Fetch students
+    const { data: studentsData } = await supabase
       .from("profiles")
       .select("id, full_name")
       .eq("tenant_id", profile.tenant_id)
       .eq("role", "student")
 
-    const studentIds = students?.map(s => s.id) || []
+    const students = studentsData || []
+    const studentIds = students.map(s => s.id)
 
     if (studentIds.length === 0) {
       return NextResponse.json({
@@ -70,24 +76,24 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    // 4️⃣ Get completed sessions
-    const { data: sessions } = await supabase
+    // 4️⃣ Fetch completed probe sessions
+    const { data: sessionsData } = await supabase
       .from("probe_sessions")
-      .select("user_id, stability_score, status, metadata")
+      .select("user_id, stability_score, metadata")
       .in("user_id", studentIds)
       .eq("status", "completed")
 
-    const completed = sessions || []
+    const sessions = sessionsData || []
 
     // 5️⃣ Compute class average
     const avg =
-      completed.reduce((sum, s) => sum + (s.stability_score || 0), 0) /
-      (completed.length || 1)
+      sessions.reduce((sum, s) => sum + (s.stability_score || 0), 0) /
+      (sessions.length || 1)
 
-    // 6️⃣ Weak concepts aggregation
+    // 6️⃣ Aggregate weak concepts
     const conceptMap: Record<string, { total: number; count: number }> = {}
 
-    completed.forEach(session => {
+    sessions.forEach(session => {
       const results = session.metadata?.results || []
 
       results.forEach((node: any) => {
@@ -108,20 +114,20 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => a.average_score - b.average_score)
       .slice(0, 5)
 
-    // 7️⃣ At risk students (lowest stability)
-    const studentMap: Record<string, number> = {}
+    // 7️⃣ At-risk students
+    const studentScoreMap: Record<string, number> = {}
 
-    completed.forEach(session => {
-      studentMap[session.user_id] = session.stability_score || 0
+    sessions.forEach(session => {
+      studentScoreMap[session.user_id] = session.stability_score || 0
     })
 
     const atRisk = students
-      ?.map(s => ({
+      .map(s => ({
         student_name: s.full_name || "Student",
-        stability_score: studentMap[s.id] || 0
+        stability_score: studentScoreMap[s.id] || 0
       }))
       .sort((a, b) => a.stability_score - b.stability_score)
-      .slice(0, 5) || []
+      .slice(0, 5)
 
     return NextResponse.json({
       overview: {
