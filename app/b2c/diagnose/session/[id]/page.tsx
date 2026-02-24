@@ -32,7 +32,7 @@ export default function DiagnoseSessionPage() {
     try {
       const res = await fetch(`/api/probe/session?id=${id}`)
       const data = await res.json()
-      setProbes(data.probes || [])
+      setProbes(data.metadata?.probes || [])
     } catch {
       setProbes([])
     } finally {
