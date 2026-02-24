@@ -11,8 +11,15 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    if (!process.env.GEMINI_API_KEY) {
+      return NextResponse.json(
+        { error: "GEMINI_API_KEY missing" },
+        { status: 500 }
+      )
+    }
+
     const geminiResponse = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
       {
         method: "POST",
         headers: {
@@ -25,24 +32,25 @@ export async function POST(req: NextRequest) {
               parts: [
                 {
                   text: `
-You are a structural repair engine.
+You are an academic tutor providing targeted clarification.
 
 Topic: ${topic}
-Node: ${node_name}
+Subtopic: ${node_name}
 Missing Concepts: ${JSON.stringify(missing_concepts)}
 
 Generate:
 
 {
-  "explanation": "Focused structural explanation (max 250 words)",
-  "example": "One worked example",
-  "check_question": "One conceptual verification question"
+  "explanation": "Clear and simple explanation (max 250 words)",
+  "example": "One short worked example",
+  "check_question": "One short conceptual verification question"
 }
 
-STRICT:
-- Do NOT re-teach full topic
-- Only address missing concepts
-- Return ONLY JSON
+Rules:
+- Address ONLY the missing concepts
+- Do NOT reteach the full topic
+- Keep language simple and clear
+- Return ONLY valid JSON
 `
                 }
               ]
@@ -53,24 +61,17 @@ STRICT:
     )
 
     if (!geminiResponse.ok) {
+      const errorText = await geminiResponse.text()
       return NextResponse.json(
-        { error: "Gemini repair failed" },
+        { error: "Gemini repair failed", details: errorText },
         { status: 500 }
       )
     }
 
-    let geminiData
-    try {
-      geminiData = await geminiResponse.json()
-    } catch {
-      return NextResponse.json(
-        { error: "Invalid Gemini response" },
-        { status: 500 }
-      )
-    }
+    const geminiData = await geminiResponse.json()
 
     const raw =
-      geminiData.candidates?.[0]?.content?.parts?.[0]?.text || ""
+      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
     const cleaned = raw
       .replace(/```json/g, "")
@@ -89,9 +90,9 @@ STRICT:
 
     return NextResponse.json(parsed)
 
-  } catch {
+  } catch (error) {
     return NextResponse.json(
-      { error: "Repair failed" },
+      { error: "Repair failed", details: String(error) },
       { status: 500 }
     )
   }
