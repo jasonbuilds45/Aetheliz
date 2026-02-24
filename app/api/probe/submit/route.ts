@@ -134,8 +134,7 @@ export async function POST(req: NextRequest) {
             {
               parts: [
                 {
-                  text: `
-text: `
+                  text: 
 You are an academic concept evaluator.
 
 Return ONLY valid JSON array.
