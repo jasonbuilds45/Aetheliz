@@ -1,164 +1,115 @@
-"use client"
+"use client";
 
-import React, { useMemo, useState } from "react"
+import React, { useMemo, useState } from "react";
 import ReactFlow, {
   Background,
   Controls,
   Node,
   Edge,
-  MarkerType
-} from "reactflow"
-import "reactflow/dist/style.css"
+  MarkerType,
+} from "reactflow";
+import "reactflow/dist/style.css";
 
 type NodeType = {
-  id: string
-  name: string
-  description?: string
-  prerequisites?: string[]
-}
+  id: string;
+  name: string;
+  description?: string;
+  prerequisites?: string[];
+};
 
-export default function ArchitectGraph({
-  nodes
-}: {
-  nodes: NodeType[]
-}) {
-  const [selectedNode, setSelectedNode] = useState<NodeType | null>(null)
+export default function ArchitectGraph({ nodes }: { nodes: NodeType[] }) {
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
-  // -------- Compute Depth Levels --------
   const levelMap = useMemo(() => {
-    const map: Record<string, number> = {}
-
+    const map: Record<string, number> = {};
     function getLevel(id: string): number {
-      const node = nodes.find(n => n.id === id)
-      if (!node || !node.prerequisites?.length) return 0
-      return 1 + Math.max(...node.prerequisites.map(p => getLevel(p)))
+      const node = nodes.find((n) => n.id === id);
+      if (!node || !node.prerequisites?.length) return 0;
+      return 1 + Math.max(...node.prerequisites.map((p) => getLevel(p)));
     }
-
-    nodes.forEach(node => {
-      map[node.id] = getLevel(node.id)
-    })
-
-    return map
-  }, [nodes])
+    nodes.forEach((node) => {
+      map[node.id] = getLevel(node.id);
+    });
+    return map;
+  }, [nodes]);
 
   const flowNodes: Node[] = useMemo(() => {
-    const spacingX = 220
-    const spacingY = 140
-
-    return nodes.map((node, index) => ({
+    return nodes.map((node) => ({
       id: node.id,
       data: { label: node.name },
       position: {
-        x: index * spacingX,
-        y: levelMap[node.id] * spacingY
+        x: (parseInt(node.id) || 0) * 200,
+        y: levelMap[node.id] * 120,
       },
       style: {
-        border: "1px solid #cbd5e1",
-        borderRadius: "8px",
-        padding: "10px",
         background: "#ffffff",
-        fontSize: "13px"
-      }
-    }))
-  }, [nodes, levelMap])
+        border: selectedNodeId === node.id ? "2px solid #4f46e5" : "1px solid #e2e8f0",
+        borderRadius: "12px",
+        padding: "16px",
+        fontWeight: "600",
+        color: "#1e293b",
+        boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+        cursor: "pointer",
+        width: 160,
+        textAlign: "center",
+      },
+    }));
+  }, [nodes, levelMap, selectedNodeId]);
 
   const flowEdges: Edge[] = useMemo(() => {
-    const edges: Edge[] = []
+    return nodes.flatMap((node) =>
+      (node.prerequisites || []).map((pre) => ({
+        id: `${pre}-${node.id}`,
+        source: pre,
+        target: node.id,
+        animated: true,
+        markerEnd: { type: MarkerType.ArrowClosed, color: "#94a3b8" },
+        style: { stroke: "#94a3b8", strokeWidth: 2 },
+      }))
+    );
+  }, [nodes]);
 
-    nodes.forEach(node => {
-      node.prerequisites?.forEach(pre => {
-        edges.push({
-          id: `${pre}-${node.id}`,
-          source: pre,
-          target: node.id,
-          markerEnd: {
-            type: MarkerType.ArrowClosed
-          },
-          style: { stroke: "#64748b" }
-        })
-      })
-    })
-
-    return edges
-  }, [nodes])
-
-  const handleNodeClick = (_: any, node: Node) => {
-    const fullNode = nodes.find(n => n.id === node.id)
-    if (fullNode) setSelectedNode(fullNode)
-  }
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
   return (
-    <div className="grid lg:grid-cols-3 gap-6">
-
-      {/* Graph */}
-      <div className="lg:col-span-2 h-[500px] bg-slate-50 border border-slate-200 rounded-lg">
+    <div className="grid lg:grid-cols-3 gap-8 p-6 bg-slate-50 rounded-2xl">
+      <div className="lg:col-span-2 h-[500px] bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <ReactFlow
           nodes={flowNodes}
           edges={flowEdges}
           fitView
-          onNodeClick={handleNodeClick}
+          onNodeClick={(_, node) => setSelectedNodeId(node.id)}
         >
-          <Background />
-          <Controls />
+          <Background color="#cbd5e1" gap={20} />
+          <Controls className="!bg-white !border-slate-200" />
         </ReactFlow>
       </div>
 
-      {/* Info Panel */}
-      <div className="bg-white border border-slate-200 rounded-lg p-5 text-sm space-y-4">
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
         {selectedNode ? (
-          <>
+          <div className="space-y-6">
             <div>
-              <h3 className="font-semibold text-slate-800">
-                {selectedNode.name}
-              </h3>
-              <p className="text-slate-500 mt-2">
-                {selectedNode.description}
-              </p>
+              <h3 className="text-xl font-bold text-slate-900">{selectedNode.name}</h3>
+              <p className="text-slate-600 mt-3 leading-relaxed">{selectedNode.description}</p>
             </div>
-
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase">
-                Depends On
-              </p>
-              {selectedNode.prerequisites?.length ? (
-                <ul className="mt-2 space-y-1 text-slate-700">
-                  {selectedNode.prerequisites.map(pre => {
-                    const preNode = nodes.find(n => n.id === pre)
-                    return (
-                      <li key={pre}>
-                        • {preNode?.name}
-                      </li>
-                    )
-                  })}
-                </ul>
-              ) : (
-                <p className="mt-2 text-slate-500">
-                  Foundational concept (no prerequisites)
-                </p>
-              )}
-            </div>
-
-            {selectedNode.prerequisites?.length ? (
-              <div className="bg-indigo-50 border border-indigo-100 p-3 rounded-md">
-                <p className="text-xs font-semibold text-indigo-600 uppercase">
-                  Dependency Insight
-                </p>
-                <p className="text-xs text-indigo-700 mt-1">
-                  Understanding {selectedNode.name} requires
-                  mastery of its prerequisite concepts.
-                  Gaps in those areas will directly
-                  affect performance here.
-                </p>
+            
+            <div className="pt-4 border-t border-slate-100">
+              <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Dependencies</p>
+              <div className="flex flex-wrap gap-2 mt-3">
+                {selectedNode.prerequisites?.map((pre) => (
+                  <span key={pre} className="px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-medium">
+                    {nodes.find((n) => n.id === pre)?.name}
+                  </span>
+                )) || <p className="text-sm text-slate-400 italic">No prerequisites required.</p>}
               </div>
-            ) : null}
-          </>
+            </div>
+          </div>
         ) : (
-          <p className="text-slate-500">
-            Select a node to view details.
-          </p>
+          <div className="h-full flex items-center justify-center text-slate-400 italic">
+            Select a learning module to see details.
+          </div>
         )}
       </div>
-
     </div>
-  )
+  );
 }
