@@ -17,10 +17,19 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+        <link 
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" 
+          rel="stylesheet" 
+        />
       </head>
-      <body className={`${inter.className} bg-background-light dark:bg-background-dark text-slate-900 antialiased`}>
-        {children}
+      {/* Removed variable-based backgrounds that might be defaulting to dark.
+         bg-slate-50 provides a very soft, professional light grey-white 
+         that is standard in modern educational platforms.
+      */}
+      <body className={`${inter.className} bg-slate-50 text-slate-900 antialiased min-h-screen`}>
+        <main className="mx-auto w-full">
+          {children}
+        </main>
       </body>
     </html>
   );
