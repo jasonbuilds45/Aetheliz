@@ -12,6 +12,13 @@ interface ShellProps {
   profile: Profile
 }
 
+// Define the type for individual navigation items
+interface NavItem {
+  href: string
+  icon: string
+  label: string
+}
+
 export function WorkspaceShell({ children, profile }: ShellProps) {
   const pathname = usePathname()
   const router = useRouter()
@@ -21,7 +28,8 @@ export function WorkspaceShell({ children, profile }: ShellProps) {
     router.replace('/')
   }
 
-  const navItems = {
+  // Explicitly typed navigation object
+  const allNavItems: Record<'principal' | 'teacher' | 'student', NavItem[]> = {
     principal: [
       { href: '/b2b/principal', icon: 'dashboard', label: 'Overview' },
       { href: '/b2b/principal/fragility-ranking', icon: 'priority_high', label: 'Fragility' },
@@ -38,7 +46,10 @@ export function WorkspaceShell({ children, profile }: ShellProps) {
       { href: '/b2c/diagnose', icon: 'biotech', label: 'Diagnose' },
       { href: '/b2c/repair', icon: 'build', label: 'Repair' },
     ],
-  }[profile.role as 'principal' | 'teacher' | 'student'] || navItems.student
+  }
+
+  // Safely access the role, defaulting to student if role is undefined or unknown
+  const navItems = allNavItems[profile.role as keyof typeof allNavItems] || allNavItems.student
 
   return (
     <div className="flex min-h-screen bg-slate-50">
