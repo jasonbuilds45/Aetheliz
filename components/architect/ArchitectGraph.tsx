@@ -18,8 +18,13 @@ export default function ArchitectGraph({
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  /* -------------------------------------------------- */
+  /* 1️⃣ Compute Structural Levels */
+  /* -------------------------------------------------- */
+
   const levelMap = useMemo(() => {
     const map: Record<string, number> = {};
+
     function getLevel(id: string): number {
       if (map[id] !== undefined) return map[id];
       const node = nodes.find((n) => n.id === id);
@@ -27,13 +32,19 @@ export default function ArchitectGraph({
         map[id] = 0;
         return 0;
       }
-      const level = 1 + Math.max(...node.prerequisites.map((p) => getLevel(p)));
+      const level =
+        1 + Math.max(...node.prerequisites.map((p) => getLevel(p)));
       map[id] = level;
       return level;
     }
+
     nodes.forEach((node) => getLevel(node.id));
     return map;
   }, [nodes]);
+
+  /* -------------------------------------------------- */
+  /* 2️⃣ Group By Stage */
+  /* -------------------------------------------------- */
 
   const grouped = useMemo(() => {
     const groups: Record<number, NodeType[]> = {};
@@ -45,11 +56,21 @@ export default function ArchitectGraph({
     return groups;
   }, [nodes, levelMap]);
 
-  const stageLabels = ["Foundation", "Core Structure", "Applied Understanding", "Advanced Extension"];
+  const stageLabels = [
+    "Foundation",
+    "Core Structure",
+    "Applied Understanding",
+    "Advanced Extension",
+  ];
+
+  /* -------------------------------------------------- */
+  /* 3️⃣ Relationship Detection */
+  /* -------------------------------------------------- */
 
   const upstream = useMemo(() => {
     if (!selectedId) return new Set<string>();
     const visited = new Set<string>();
+
     function dfs(id: string) {
       const node = nodes.find((n) => n.id === id);
       node?.prerequisites?.forEach((p) => {
@@ -59,6 +80,7 @@ export default function ArchitectGraph({
         }
       });
     }
+
     dfs(selectedId);
     return visited;
   }, [selectedId, nodes]);
@@ -66,6 +88,7 @@ export default function ArchitectGraph({
   const downstream = useMemo(() => {
     if (!selectedId) return new Set<string>();
     const visited = new Set<string>();
+
     function dfs(id: string) {
       nodes.forEach((n) => {
         if (n.prerequisites?.includes(id)) {
@@ -76,104 +99,165 @@ export default function ArchitectGraph({
         }
       });
     }
+
     dfs(selectedId);
     return visited;
   }, [selectedId, nodes]);
 
   const selectedNode = nodes.find((n) => n.id === selectedId);
 
+  /* -------------------------------------------------- */
+  /* 4️⃣ Render Blueprint */
+  /* -------------------------------------------------- */
+
   return (
-    <div className="grid lg:grid-cols-3 gap-16 max-w-7xl mx-auto p-8 font-sans antialiased text-slate-800">
-      
+    <div className="grid lg:grid-cols-3 gap-12">
+
       {/* Blueprint Column */}
-      <div className="lg:col-span-2 space-y-12">
-        {Object.keys(grouped).sort((a, b) => Number(a) - Number(b)).map((lvlStr, index) => {
-          const lvl = Number(lvlStr);
-          const stageTitle = stageLabels[index] || `Stage ${index + 1}`;
+      <div className="lg:col-span-2 space-y-16">
 
-          return (
-            <div key={lvl} className="relative">
-              <div className="flex items-center gap-4 mb-8">
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500 bg-indigo-50 px-3 py-1 rounded-full">
-                  {stageTitle}
-                </span>
-                <div className="h-px flex-1 bg-slate-200" />
-              </div>
+        {Object.keys(grouped)
+          .sort((a, b) => Number(a) - Number(b))
+          .map((lvlStr, index) => {
+            const lvl = Number(lvlStr);
+            const stageTitle =
+              stageLabels[index] || `Stage ${index + 1}`;
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {grouped[lvl].map((node) => {
-                  const isSelected = node.id === selectedId;
-                  const isUpstream = upstream.has(node.id);
-                  const isDownstream = downstream.has(node.id);
+            return (
+              <div key={lvl} className="text-center">
 
-                  const baseClasses = "group relative p-6 rounded-2xl border-2 transition-all duration-300 cursor-pointer shadow-sm hover:shadow-md";
-                  let stateClasses = "bg-white border-slate-200 hover:border-indigo-200";
-
-                  if (isSelected) stateClasses = "bg-indigo-50 border-indigo-500 shadow-indigo-100";
-                  else if (isUpstream) stateClasses = "bg-emerald-50 border-emerald-200";
-                  else if (isDownstream) stateClasses = "bg-amber-50 border-amber-200";
-
-                  return (
-                    <div key={node.id} onClick={() => setSelectedId(node.id)} className={`${baseClasses} ${stateClasses}`}>
-                      <h3 className="font-semibold text-slate-700">{node.name}</h3>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {index < Object.keys(grouped).length - 1 && (
-                <div className="my-8 flex justify-center">
-                  <div className="w-8 h-8 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-400">
-                    <span className="text-lg">↓</span>
-                  </div>
+                {/* Stage Label */}
+                <div className="mb-8">
+                  <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">
+                    {stageTitle}
+                  </p>
+                  <div className="mt-2 h-px bg-indigo-100 w-24 mx-auto" />
                 </div>
-              )}
-            </div>
-          );
-        })}
+
+                {/* Nodes */}
+                <div className="space-y-6">
+                  {grouped[lvl].map((node) => {
+                    const isSelected = node.id === selectedId;
+                    const isUpstream = upstream.has(node.id);
+                    const isDownstream = downstream.has(node.id);
+
+                    let bg = "bg-white";
+                    let border = "border-slate-200";
+
+                    if (isSelected) {
+                      bg = "bg-indigo-50";
+                      border = "border-indigo-400";
+                    } else if (isUpstream) {
+                      bg = "bg-emerald-50";
+                      border = "border-emerald-300";
+                    } else if (isDownstream) {
+                      bg = "bg-amber-50";
+                      border = "border-amber-300";
+                    }
+
+                    return (
+                      <div
+                        key={node.id}
+                        onClick={() => setSelectedId(node.id)}
+                        className={`${bg} ${border} border rounded-2xl px-8 py-6 max-w-xl mx-auto shadow-sm cursor-pointer transition`}
+                      >
+                        <h3 className="font-semibold text-slate-900">
+                          {node.name}
+                        </h3>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Arrow Between Stages */}
+                {index <
+                  Object.keys(grouped).length - 1 && (
+                  <div className="mt-12 flex justify-center">
+                    <div className="flex flex-col items-center text-indigo-400">
+                      <div className="h-8 w-px bg-indigo-200" />
+                      <div className="text-2xl">↓</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+        {/* CTA */}
+        <div className="text-center pt-10">
+          <button
+            onClick={onTest}
+            className="px-10 py-4 bg-indigo-600 text-white rounded-xl font-semibold shadow-sm hover:bg-indigo-700 transition"
+          >
+            Test This Blueprint
+          </button>
+        </div>
       </div>
 
       {/* Info Panel */}
-      <aside className="sticky top-8 lg:h-[calc(100vh-4rem)]">
-        <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm h-full overflow-y-auto">
-          {selectedNode ? (
-            <div className="space-y-8">
-              <header>
-                <h2 className="text-2xl font-bold text-slate-900">{selectedNode.name}</h2>
-                <p className="text-slate-500 mt-3 leading-relaxed">{selectedNode.description || "No description provided for this module."}</p>
-              </header>
+      <div className="bg-white border border-indigo-100 rounded-3xl p-8 shadow-sm space-y-6">
 
-              <div className="space-y-6">
-                <section>
-                  <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 mb-3">Prerequisites</h4>
-                  {selectedNode.prerequisites?.length ? (
-                    <div className="flex flex-wrap gap-2">
-                      {selectedNode.prerequisites.map((p) => (
-                        <span key={p} className="px-3 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-sm font-medium border border-emerald-100">
-                          {nodes.find((n) => n.id === p)?.name}
-                        </span>
-                      ))}
+        {selectedNode ? (
+          <>
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">
+                {selectedNode.name}
+              </h2>
+              <p className="text-slate-600 mt-4 leading-relaxed">
+                {selectedNode.description ||
+                  "This module forms a structural component within the overall curriculum blueprint."}
+              </p>
+            </div>
+
+            <div className="pt-6 border-t border-indigo-100">
+              <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">
+                Why It Depends on Others
+              </p>
+              <p className="text-sm text-slate-600 mt-3 leading-relaxed">
+                This concept builds directly upon its prerequisite modules.
+                Weak foundational understanding will propagate upward and
+                reduce conceptual stability at this level.
+              </p>
+            </div>
+
+            <div className="pt-6 border-t border-indigo-100">
+              <p className="text-xs font-bold uppercase tracking-widest text-amber-600">
+                What It Enables
+              </p>
+              <p className="text-sm text-slate-600 mt-3 leading-relaxed">
+                Once mastered, this module unlocks more advanced structural
+                reasoning in subsequent curriculum layers.
+              </p>
+            </div>
+
+            <div className="pt-6 border-t border-indigo-100">
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
+                Direct Prerequisites
+              </p>
+              <div className="mt-3 space-y-2">
+                {selectedNode.prerequisites?.length ? (
+                  selectedNode.prerequisites.map((pre) => (
+                    <div
+                      key={pre}
+                      className="px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700"
+                    >
+                      {nodes.find((n) => n.id === pre)?.name}
                     </div>
-                  ) : <p className="text-sm text-slate-400 italic">Foundation level module.</p>}
-                </section>
-              </div>
-
-              <div className="pt-8 border-t border-slate-100">
-                <button
-                  onClick={onTest}
-                  className="w-full py-4 bg-slate-900 text-white rounded-xl font-semibold hover:bg-slate-800 transition-colors"
-                >
-                  Start Assessment
-                </button>
+                  ))
+                ) : (
+                  <p className="text-sm text-slate-400 italic">
+                    Foundational concept
+                  </p>
+                )}
               </div>
             </div>
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center border-2 border-dashed border-slate-100 rounded-2xl">
-              <p>Select a module to view its details and prerequisites.</p>
-            </div>
-          )}
-        </div>
-      </aside>
+          </>
+        ) : (
+          <div className="h-full flex items-center justify-center text-slate-400 italic text-center">
+            Select a module to explore its structural role.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
