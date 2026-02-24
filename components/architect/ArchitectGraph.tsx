@@ -1,14 +1,6 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import ReactFlow, {
-  Background,
-  Controls,
-  Node,
-  Edge,
-  MarkerType,
-} from "reactflow";
-import "reactflow/dist/style.css";
 
 type NodeType = {
   id: string;
@@ -17,11 +9,17 @@ type NodeType = {
   prerequisites?: string[];
 };
 
-export default function ArchitectGraph({ nodes }: { nodes: NodeType[] }) {
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+export default function ArchitectGraph({
+  nodes,
+  onTest,
+}: {
+  nodes: NodeType[];
+  onTest?: () => void;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   /* -------------------------------------------------- */
-  /* 1️⃣ Compute Levels Properly */
+  /* 1️⃣ Compute Structural Levels */
   /* -------------------------------------------------- */
 
   const levelMap = useMemo(() => {
@@ -45,25 +43,32 @@ export default function ArchitectGraph({ nodes }: { nodes: NodeType[] }) {
   }, [nodes]);
 
   /* -------------------------------------------------- */
-  /* 2️⃣ Group Nodes by Level */
+  /* 2️⃣ Group By Stage */
   /* -------------------------------------------------- */
 
-  const levels = useMemo(() => {
-    const grouped: Record<number, NodeType[]> = {};
+  const grouped = useMemo(() => {
+    const groups: Record<number, NodeType[]> = {};
     nodes.forEach((node) => {
       const lvl = levelMap[node.id];
-      if (!grouped[lvl]) grouped[lvl] = [];
-      grouped[lvl].push(node);
+      if (!groups[lvl]) groups[lvl] = [];
+      groups[lvl].push(node);
     });
-    return grouped;
+    return groups;
   }, [nodes, levelMap]);
 
+  const stageLabels = [
+    "Foundation",
+    "Core Structure",
+    "Applied Understanding",
+    "Advanced Extension",
+  ];
+
   /* -------------------------------------------------- */
-  /* 3️⃣ Determine Relationship Sets */
+  /* 3️⃣ Relationship Detection */
   /* -------------------------------------------------- */
 
   const upstream = useMemo(() => {
-    if (!selectedNodeId) return new Set<string>();
+    if (!selectedId) return new Set<string>();
     const visited = new Set<string>();
 
     function dfs(id: string) {
@@ -76,12 +81,12 @@ export default function ArchitectGraph({ nodes }: { nodes: NodeType[] }) {
       });
     }
 
-    dfs(selectedNodeId);
+    dfs(selectedId);
     return visited;
-  }, [selectedNodeId, nodes]);
+  }, [selectedId, nodes]);
 
   const downstream = useMemo(() => {
-    if (!selectedNodeId) return new Set<string>();
+    if (!selectedId) return new Set<string>();
     const visited = new Set<string>();
 
     function dfs(id: string) {
@@ -95,178 +100,161 @@ export default function ArchitectGraph({ nodes }: { nodes: NodeType[] }) {
       });
     }
 
-    dfs(selectedNodeId);
+    dfs(selectedId);
     return visited;
-  }, [selectedNodeId, nodes]);
+  }, [selectedId, nodes]);
+
+  const selectedNode = nodes.find((n) => n.id === selectedId);
 
   /* -------------------------------------------------- */
-  /* 4️⃣ Layout Proper Centered Grid */
-  /* -------------------------------------------------- */
-
-  const flowNodes: Node[] = useMemo(() => {
-    const spacingX = 220;
-    const spacingY = 160;
-
-    const result: Node[] = [];
-
-    Object.entries(levels).forEach(([lvlStr, nodesInLevel]) => {
-      const lvl = Number(lvlStr);
-      const totalWidth = nodesInLevel.length * spacingX;
-      const startX = -totalWidth / 2;
-
-      nodesInLevel.forEach((node, index) => {
-        const isSelected = node.id === selectedNodeId;
-        const isUpstream = upstream.has(node.id);
-        const isDownstream = downstream.has(node.id);
-
-        let borderColor = "#e2e8f0";
-        let background = "#ffffff";
-
-        if (isSelected) {
-          borderColor = "#4f46e5";
-          background = "#eef2ff";
-        } else if (isUpstream) {
-          borderColor = "#10b981";
-          background = "#ecfdf5";
-        } else if (isDownstream) {
-          borderColor = "#f59e0b";
-          background = "#fffbeb";
-        }
-
-        result.push({
-          id: node.id,
-          data: { label: node.name },
-          position: {
-            x: startX + index * spacingX,
-            y: lvl * spacingY,
-          },
-          style: {
-            background,
-            border: `2px solid ${borderColor}`,
-            borderRadius: "14px",
-            padding: "16px",
-            fontWeight: 600,
-            color: "#1e293b",
-            width: 180,
-            textAlign: "center",
-            boxShadow:
-              "0 6px 16px -4px rgba(0,0,0,0.08)",
-            cursor: "pointer",
-          },
-        });
-      });
-    });
-
-    return result;
-  }, [levels, selectedNodeId, upstream, downstream]);
-
-  /* -------------------------------------------------- */
-  /* 5️⃣ Edges */
-  /* -------------------------------------------------- */
-
-  const flowEdges: Edge[] = useMemo(() => {
-    return nodes.flatMap((node) =>
-      (node.prerequisites || []).map((pre) => ({
-        id: `${pre}-${node.id}`,
-        source: pre,
-        target: node.id,
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: "#94a3b8",
-        },
-        style: {
-          stroke: "#94a3b8",
-          strokeWidth: 2,
-        },
-      }))
-    );
-  }, [nodes]);
-
-  const selectedNode = nodes.find((n) => n.id === selectedNodeId);
-
-  /* -------------------------------------------------- */
-  /* 6️⃣ Render */
+  /* 4️⃣ Render Blueprint */
   /* -------------------------------------------------- */
 
   return (
-    <div className="grid lg:grid-cols-3 gap-8 p-8 bg-indigo-50 rounded-3xl">
+    <div className="grid lg:grid-cols-3 gap-12">
 
-      {/* Graph Area */}
-      <div className="lg:col-span-2 h-[600px] bg-white border border-indigo-100 rounded-3xl shadow-sm overflow-hidden">
-        <ReactFlow
-          nodes={flowNodes}
-          edges={flowEdges}
-          fitView
-          onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-        >
-          <Background color="#e2e8f0" gap={24} />
-          <Controls className="!bg-white !border-indigo-100" />
-        </ReactFlow>
+      {/* Blueprint Column */}
+      <div className="lg:col-span-2 space-y-16">
+
+        {Object.keys(grouped)
+          .sort((a, b) => Number(a) - Number(b))
+          .map((lvlStr, index) => {
+            const lvl = Number(lvlStr);
+            const stageTitle =
+              stageLabels[index] || `Stage ${index + 1}`;
+
+            return (
+              <div key={lvl} className="text-center">
+
+                {/* Stage Label */}
+                <div className="mb-8">
+                  <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">
+                    {stageTitle}
+                  </p>
+                  <div className="mt-2 h-px bg-indigo-100 w-24 mx-auto" />
+                </div>
+
+                {/* Nodes */}
+                <div className="space-y-6">
+                  {grouped[lvl].map((node) => {
+                    const isSelected = node.id === selectedId;
+                    const isUpstream = upstream.has(node.id);
+                    const isDownstream = downstream.has(node.id);
+
+                    let bg = "bg-white";
+                    let border = "border-slate-200";
+
+                    if (isSelected) {
+                      bg = "bg-indigo-50";
+                      border = "border-indigo-400";
+                    } else if (isUpstream) {
+                      bg = "bg-emerald-50";
+                      border = "border-emerald-300";
+                    } else if (isDownstream) {
+                      bg = "bg-amber-50";
+                      border = "border-amber-300";
+                    }
+
+                    return (
+                      <div
+                        key={node.id}
+                        onClick={() => setSelectedId(node.id)}
+                        className={`${bg} ${border} border rounded-2xl px-8 py-6 max-w-xl mx-auto shadow-sm cursor-pointer transition`}
+                      >
+                        <h3 className="font-semibold text-slate-900">
+                          {node.name}
+                        </h3>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Arrow Between Stages */}
+                {index <
+                  Object.keys(grouped).length - 1 && (
+                  <div className="mt-12 flex justify-center">
+                    <div className="flex flex-col items-center text-indigo-400">
+                      <div className="h-8 w-px bg-indigo-200" />
+                      <div className="text-2xl">↓</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+        {/* CTA */}
+        <div className="text-center pt-10">
+          <button
+            onClick={onTest}
+            className="px-10 py-4 bg-indigo-600 text-white rounded-xl font-semibold shadow-sm hover:bg-indigo-700 transition"
+          >
+            Test This Blueprint
+          </button>
+        </div>
       </div>
 
       {/* Info Panel */}
       <div className="bg-white border border-indigo-100 rounded-3xl p-8 shadow-sm space-y-6">
+
         {selectedNode ? (
           <>
             <div>
-              <h3 className="text-2xl font-bold text-slate-900">
+              <h2 className="text-2xl font-bold text-slate-900">
                 {selectedNode.name}
-              </h3>
+              </h2>
               <p className="text-slate-600 mt-4 leading-relaxed">
                 {selectedNode.description ||
-                  "This module represents a structural component of the overall concept map."}
+                  "This module forms a structural component within the overall curriculum blueprint."}
               </p>
             </div>
 
-            {/* Dependency Explanation */}
-            <div className="pt-6 border-t border-indigo-50">
-              <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider">
-                Why This Depends on Others
+            <div className="pt-6 border-t border-indigo-100">
+              <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">
+                Why It Depends on Others
               </p>
               <p className="text-sm text-slate-600 mt-3 leading-relaxed">
-                Mastery of this concept requires understanding its prerequisite
-                modules. Structural gaps in upstream nodes will propagate here,
-                affecting reasoning depth and accuracy.
+                This concept builds directly upon its prerequisite modules.
+                Weak foundational understanding will propagate upward and
+                reduce conceptual stability at this level.
               </p>
             </div>
 
-            {/* Unlock Explanation */}
-            <div className="pt-6 border-t border-indigo-50">
-              <p className="text-xs font-bold text-amber-600 uppercase tracking-wider">
-                What This Unlocks
+            <div className="pt-6 border-t border-indigo-100">
+              <p className="text-xs font-bold uppercase tracking-widest text-amber-600">
+                What It Enables
               </p>
               <p className="text-sm text-slate-600 mt-3 leading-relaxed">
-                Once stabilized, this module enables progression into more
-                advanced conceptual dependencies further down the structure.
+                Once mastered, this module unlocks more advanced structural
+                reasoning in subsequent curriculum layers.
               </p>
             </div>
 
-            {/* Prerequisites List */}
-            <div className="pt-6 border-t border-indigo-50">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            <div className="pt-6 border-t border-indigo-100">
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
                 Direct Prerequisites
               </p>
-              <div className="flex flex-wrap gap-2 mt-3">
+              <div className="mt-3 space-y-2">
                 {selectedNode.prerequisites?.length ? (
                   selectedNode.prerequisites.map((pre) => (
-                    <span
+                    <div
                       key={pre}
-                      className="px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs font-medium"
+                      className="px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700"
                     >
                       {nodes.find((n) => n.id === pre)?.name}
-                    </span>
+                    </div>
                   ))
                 ) : (
-                  <span className="text-sm text-slate-400 italic">
+                  <p className="text-sm text-slate-400 italic">
                     Foundational concept
-                  </span>
+                  </p>
                 )}
               </div>
             </div>
           </>
         ) : (
           <div className="h-full flex items-center justify-center text-slate-400 italic text-center">
-            Select a module to explore its structural role within the concept map.
+            Select a module to explore its structural role.
           </div>
         )}
       </div>
