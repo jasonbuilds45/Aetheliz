@@ -34,23 +34,29 @@ export default function PrincipalDashboard() {
   }
 
   const handleInvite = async () => {
-    if (!inviteEmail) return
+  if (!inviteEmail) return
 
-    setInviting(true)
+  setInviting(true)
 
-    await fetch("/api/b2b/invite", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: inviteEmail,
-        role: inviteRole
-      })
+  const res = await fetch("/api/b2b/invite", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: inviteEmail,
+      role: inviteRole
     })
+  })
 
-    setInviteEmail("")
-    setInviteOpen(false)
-    setInviting(false)
+  const data = await res.json()
+
+  if (data.invite_link) {
+    alert(`Invite Link:\n\n${data.invite_link}`)
   }
+
+  setInviteEmail("")
+  setInviteOpen(false)
+  setInviting(false)
+}
 
   const teachers = members.filter(m => m.role === "teacher")
   const students = members.filter(m => m.role === "student")

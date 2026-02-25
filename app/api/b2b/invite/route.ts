@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
-import crypto from "crypto"
+import { randomUUID } from "crypto"
 
 export async function POST(req: NextRequest) {
   try {
     const { email, role } = await req.json()
 
     if (!email || !role) {
-      return NextResponse.json({ error: "Missing parameters" }, { status: 400 })
-    }
-
-    if (!["teacher", "student"].includes(role)) {
-      return NextResponse.json({ error: "Invalid role" }, { status: 400 })
+      return NextResponse.json(
+        { error: "Missing parameters" },
+        { status: 400 }
+      )
     }
 
     const cookieStore = cookies()
@@ -42,7 +41,7 @@ export async function POST(req: NextRequest) {
     // Get principal profile
     const { data: profile } = await supabase
       .from("profiles")
-      .select("role, tenant_id")
+      .select("tenant_id, role")
       .eq("id", user.id)
       .single()
 
@@ -50,36 +49,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
-    const token = crypto.randomBytes(32).toString("hex")
+    const token = randomUUID()
 
-    const { error: inviteError } = await supabase
+    const expiresAt = new Date()
+    expiresAt.setDate(expiresAt.getDate() + 7)
+
+    const { error } = await supabase
       .from("invitations")
       .insert({
         email,
         role,
         tenant_id: profile.tenant_id,
+        invited_by: user.id,
         token,
-        status: "pending",
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+        expires_at: expiresAt.toISOString(),
+        status: "pending"
       })
 
-    if (inviteError) {
-      return NextResponse.json({ error: "Invite failed" }, { status: 500 })
+    if (error) {
+      return NextResponse.json(
+        { error: "Failed to create invitation" },
+        { status: 500 }
+      )
     }
 
-    const inviteLink = `${process.env.NEXT_PUBLIC_APP_URL}/auth/accept-invite?token=${token}`
+    const inviteLink = `${process.env.NEXT_PUBLIC_SITE_URL}/auth/accept-invite?token=${token}`
 
-    // Send magic link email
-    await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: inviteLink
-      }
+    return NextResponse.json({
+      success: true,
+      invite_link: inviteLink
     })
 
-    return NextResponse.json({ success: true })
-
-  } catch (error) {
-    return NextResponse.json({ error: "Invite failed" }, { status: 500 })
+  } catch {
+    return NextResponse.json(
+      { error: "Invite failed" },
+      { status: 500 }
+    )
   }
 }
