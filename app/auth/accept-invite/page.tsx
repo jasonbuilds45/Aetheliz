@@ -1,10 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { createClient } from "@supabase/supabase-js"
 
-export default function AcceptInvitePage() {
+export const dynamic = "force-dynamic"
+
+function AcceptInviteContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
 
@@ -30,7 +32,6 @@ export default function AcceptInvitePage() {
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
       )
 
-      // Wait for session (magic link login)
       const {
         data: { session }
       } = await supabase.auth.getSession()
@@ -41,7 +42,6 @@ export default function AcceptInvitePage() {
         return
       }
 
-      // Call backend to finalize invite
       const res = await fetch("/api/b2b/accept-invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -56,7 +56,6 @@ export default function AcceptInvitePage() {
         return
       }
 
-      // Redirect based on role
       router.replace("/dashboard")
 
     } catch {
@@ -68,7 +67,6 @@ export default function AcceptInvitePage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-6">
       <div className="bg-white border border-slate-200 rounded-2xl p-10 shadow-sm max-w-md w-full text-center space-y-6">
-
         <h1 className="text-xl font-semibold text-slate-900">
           Invitation Processing
         </h1>
@@ -93,5 +91,13 @@ export default function AcceptInvitePage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function AcceptInvitePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <AcceptInviteContent />
+    </Suspense>
   )
 }
