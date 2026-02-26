@@ -1,7 +1,12 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 type NodeType = {
   id: string;
@@ -34,18 +39,19 @@ export default function ArchitectGraph({
   edges: EdgeType[];
   onTest?: () => void;
 }) {
-  const supabase = createClientComponentClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [stabilityMap, setStabilityMap] = useState<
     Record<string, StabilityType>
   >({});
 
   /* -------------------------------------------------- */
-  /* 1️⃣ Fetch Stability From DB */
+  /* 1️⃣ Fetch Stability */
   /* -------------------------------------------------- */
 
   useEffect(() => {
     async function fetchStability() {
+      if (!nodes.length) return;
+
       const { data, error } = await supabase
         .from("architect_stability")
         .select("node_id, stability_state, confidence_score")
@@ -63,10 +69,8 @@ export default function ArchitectGraph({
       }
     }
 
-    if (nodes.length) {
-      fetchStability();
-    }
-  }, [nodes, supabase]);
+    fetchStability();
+  }, [nodes]);
 
   /* -------------------------------------------------- */
   /* 2️⃣ Build Adjacency Maps */
@@ -98,11 +102,13 @@ export default function ArchitectGraph({
 
     function computeLevel(id: string): number {
       if (levels[id] !== undefined) return levels[id];
+
       const prereqs = prereqMap[id] || [];
       if (!prereqs.length) {
         levels[id] = 0;
         return 0;
       }
+
       const lvl = 1 + Math.max(...prereqs.map(computeLevel));
       levels[id] = lvl;
       return lvl;
@@ -119,17 +125,9 @@ export default function ArchitectGraph({
   const propagatedState = useMemo(() => {
     const result: Record<string, "stable" | "fragile" | "broken"> = {};
 
-    // Start with base states
     nodes.forEach((node) => {
       result[node.id] =
         stabilityMap[node.id]?.stability_state || "fragile";
-    });
-
-    // If a node is broken → all downstream become fragile (if not broken)
-    nodes.forEach((node) => {
-      if (result[node.id] === "broken") {
-        propagateDown(node.id);
-      }
     });
 
     function propagateDown(id: string) {
@@ -141,6 +139,12 @@ export default function ArchitectGraph({
         propagateDown(dep);
       });
     }
+
+    nodes.forEach((node) => {
+      if (result[node.id] === "broken") {
+        propagateDown(node.id);
+      }
+    });
 
     return result;
   }, [nodes, stabilityMap, dependentMap]);
@@ -161,10 +165,6 @@ export default function ArchitectGraph({
 
   const selectedNode = nodes.find((n) => n.id === selectedId);
 
-  /* -------------------------------------------------- */
-  /* 6️⃣ UI Coloring Logic */
-  /* -------------------------------------------------- */
-
   function getColorClasses(nodeId: string) {
     const state = propagatedState[nodeId];
     const confidence = stabilityMap[nodeId]?.confidence_score || 0;
@@ -177,125 +177,63 @@ export default function ArchitectGraph({
       return "bg-rose-50 border-rose-400";
     }
 
-    // fragile
     return confidence > 0.6
       ? "bg-amber-50 border-amber-300"
       : "bg-orange-50 border-orange-400";
   }
 
   /* -------------------------------------------------- */
-  /* 7️⃣ Render */
+  /* 6️⃣ Render */
   /* -------------------------------------------------- */
 
   return (
-    <div className="grid lg:grid-cols-3 gap-12">
+    <div className="space-y-16">
 
-      {/* Blueprint Column */}
-      <div className="lg:col-span-2 space-y-16">
+      {Object.keys(grouped)
+        .sort((a, b) => Number(a) - Number(b))
+        .map((lvlStr) => {
+          const lvl = Number(lvlStr);
 
-        {Object.keys(grouped)
-          .sort((a, b) => Number(a) - Number(b))
-          .map((lvlStr) => {
-            const lvl = Number(lvlStr);
+          return (
+            <div key={lvl} className="text-center space-y-6">
+              <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">
+                Level {lvl}
+              </p>
 
-            return (
-              <div key={lvl} className="text-center">
-
-                <div className="mb-8">
-                  <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">
-                    Level {lvl}
-                  </p>
-                  <div className="mt-2 h-px bg-indigo-100 w-24 mx-auto" />
+              {grouped[lvl].map((node) => (
+                <div
+                  key={node.id}
+                  onClick={() => setSelectedId(node.id)}
+                  className={`${getColorClasses(node.id)} border rounded-xl px-6 py-4 max-w-xl mx-auto shadow-sm cursor-pointer transition`}
+                >
+                  <h3 className="font-semibold text-slate-900">
+                    {node.name}
+                  </h3>
                 </div>
+              ))}
+            </div>
+          );
+        })}
 
-                <div className="space-y-6">
-                  {grouped[lvl].map((node) => {
-                    const isSelected = node.id === selectedId;
-                    const color = getColorClasses(node.id);
+      {selectedNode && (
+        <div className="mt-12 p-6 bg-slate-50 rounded-xl border">
+          <h2 className="text-xl font-bold">{selectedNode.name}</h2>
+          <p className="mt-4 text-sm text-slate-600">
+            {selectedNode.description}
+          </p>
 
-                    return (
-                      <div
-                        key={node.id}
-                        onClick={() => setSelectedId(node.id)}
-                        className={`${color} ${
-                          isSelected ? "ring-2 ring-indigo-400" : ""
-                        } border rounded-2xl px-8 py-6 max-w-xl mx-auto shadow-sm cursor-pointer transition`}
-                      >
-                        <h3 className="font-semibold text-slate-900">
-                          {node.name}
-                        </h3>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-
-        <div className="text-center pt-10">
-          <button
-            onClick={onTest}
-            className="px-10 py-4 bg-indigo-600 text-white rounded-xl font-semibold shadow-sm hover:bg-indigo-700 transition"
-          >
-            Test This Blueprint
-          </button>
+          {selectedNode.inclusion_reasoning && (
+            <div className="mt-6">
+              <p className="text-xs uppercase tracking-widest text-indigo-600 font-bold">
+                Inclusion Reasoning
+              </p>
+              <p className="mt-2 text-sm text-slate-600">
+                {selectedNode.inclusion_reasoning}
+              </p>
+            </div>
+          )}
         </div>
-      </div>
-
-      {/* Info Panel */}
-      <div className="bg-white border border-indigo-100 rounded-3xl p-8 shadow-sm space-y-6">
-
-        {selectedNode ? (
-          <>
-            <div>
-              <h2 className="text-2xl font-bold text-slate-900">
-                {selectedNode.name}
-              </h2>
-              <p className="text-slate-600 mt-4 leading-relaxed">
-                {selectedNode.description}
-              </p>
-            </div>
-
-            {selectedNode.inclusion_reasoning && (
-              <div className="pt-6 border-t border-indigo-100">
-                <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">
-                  Inclusion Reasoning
-                </p>
-                <p className="text-sm text-slate-600 mt-3 leading-relaxed">
-                  {selectedNode.inclusion_reasoning}
-                </p>
-              </div>
-            )}
-
-            <div className="pt-6 border-t border-indigo-100">
-              <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
-                Direct Prerequisites
-              </p>
-
-              <div className="mt-3 space-y-2">
-                {(prereqMap[selectedNode.id] || []).length ? (
-                  prereqMap[selectedNode.id].map((pre) => (
-                    <div
-                      key={pre}
-                      className="px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700"
-                    >
-                      {nodes.find((n) => n.id === pre)?.name}
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-slate-400 italic">
-                    Foundational concept
-                  </p>
-                )}
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="h-full flex items-center justify-center text-slate-400 italic text-center">
-            Select a module to explore its structural role.
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
