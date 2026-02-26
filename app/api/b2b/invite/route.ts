@@ -35,18 +35,32 @@ export async function POST(req: NextRequest) {
     } = await supabase.auth.getUser()
 
     if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      )
     }
 
     // Get principal profile
-    const { data: profile } = await supabase
+    const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("tenant_id, role")
       .eq("id", user.id)
       .single()
 
-    if (!profile || profile.role !== "principal") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    if (profileError || !profile) {
+      console.error("Profile fetch error:", profileError)
+      return NextResponse.json(
+        { error: "Profile not found" },
+        { status: 500 }
+      )
+    }
+
+    if (profile.role !== "principal") {
+      return NextResponse.json(
+        { error: "Forbidden" },
+        { status: 403 }
+      )
     }
 
     const token = randomUUID()
@@ -54,7 +68,7 @@ export async function POST(req: NextRequest) {
     const expiresAt = new Date()
     expiresAt.setDate(expiresAt.getDate() + 7)
 
-    const { error } = await supabase
+    const { error: insertError } = await supabase
       .from("invitations")
       .insert({
         email,
@@ -66,22 +80,36 @@ export async function POST(req: NextRequest) {
         status: "pending"
       })
 
-    if (error) {
+    if (insertError) {
+      console.error("Invitation insert error:", insertError)
       return NextResponse.json(
-        { error: "Failed to create invitation" },
+        { error: insertError.message },
         { status: 500 }
       )
     }
 
-    const origin = req.headers.get("origin")
-const inviteLink = `${origin}/auth/accept-invite?token=${token}`
+    // 🔥 SAFE ORIGIN RESOLUTION (works on Vercel + localhost)
+    const origin =
+      req.headers.get("origin") ||
+      req.headers.get("referer")?.split("/").slice(0, 3).join("/") ||
+      ""
+
+    if (!origin) {
+      return NextResponse.json(
+        { error: "Unable to determine application origin" },
+        { status: 500 }
+      )
+    }
+
+    const inviteLink = `${origin}/auth/accept-invite?token=${token}`
 
     return NextResponse.json({
       success: true,
       invite_link: inviteLink
     })
 
-  } catch {
+  } catch (error) {
+    console.error("Invite route error:", error)
     return NextResponse.json(
       { error: "Invite failed" },
       { status: 500 }
