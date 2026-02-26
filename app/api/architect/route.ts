@@ -20,6 +20,7 @@ function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
 
   nodes.forEach((node, index) => {
     if (!node?.id || !node?.name) return
+
     const newId = `n${index + 1}`
     idMap.set(node.id, newId)
 
@@ -37,6 +38,8 @@ function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
       ? node.prerequisites
       : []
 
+    if (!normalized[index]) return
+
     normalized[index].prerequisites = prereqs
       .map((p: string) => idMap.get(p))
       .filter(Boolean) as string[]
@@ -50,7 +53,10 @@ export async function POST(req: NextRequest) {
     const { topic, education_stage } = await req.json()
 
     if (!topic || !education_stage) {
-      return NextResponse.json({ error: "Missing parameters" }, { status: 400 })
+      return NextResponse.json(
+        { error: "Missing parameters" },
+        { status: 400 }
+      )
     }
 
     const cookieStore = cookies()
@@ -76,7 +82,10 @@ export async function POST(req: NextRequest) {
     } = await supabase.auth.getUser()
 
     if (!user || authError) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      )
     }
 
     const hash = crypto
@@ -85,12 +94,19 @@ export async function POST(req: NextRequest) {
       .digest("hex")
 
     // 🔎 Check if map already exists
-    const { data: existingMap } = await supabase
+    const { data: existingMap, error: existingError } = await supabase
       .from("architect_maps")
       .select("*")
       .eq("user_id", user.id)
       .eq("hash", hash)
       .maybeSingle()
+
+    if (existingError) {
+      return NextResponse.json(
+        { error: "Failed to check existing maps" },
+        { status: 500 }
+      )
+    }
 
     if (existingMap) {
       const { data: nodes } = await supabase
@@ -106,8 +122,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         source: "existing",
         map_id: existingMap.id,
-        nodes,
-        edges
+        nodes: nodes || [],
+        edges: edges || []
       })
     }
 
@@ -158,23 +174,48 @@ Rules:
       }
     )
 
-    const geminiData = await geminiResponse.json()
-    const raw = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
-
-    const jsonMatch = raw.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      return NextResponse.json({ error: "Invalid AI response" }, { status: 500 })
+    if (!geminiResponse.ok) {
+      return NextResponse.json(
+        { error: "Gemini API failed" },
+        { status: 500 }
+      )
     }
 
-    const parsed = JSON.parse(jsonMatch[0])
+    const geminiData = await geminiResponse.json()
+    const raw =
+      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
+
+    const jsonMatch = raw.match(/\{[\s\S]*\}/)
+
+    if (!jsonMatch) {
+      return NextResponse.json(
+        { error: "Invalid AI response" },
+        { status: 500 }
+      )
+    }
+
+    let parsed: any
+
+    try {
+      parsed = JSON.parse(jsonMatch[0])
+    } catch {
+      return NextResponse.json(
+        { error: "Malformed JSON from AI" },
+        { status: 500 }
+      )
+    }
+
     const normalized = validateAndNormalizeGraph(parsed.nodes)
 
     if (!normalized) {
-      return NextResponse.json({ error: "Invalid graph structure" }, { status: 500 })
+      return NextResponse.json(
+        { error: "Invalid graph structure" },
+        { status: 500 }
+      )
     }
 
     // 🧱 Create map
-    const { data: map } = await supabase
+    const { data: map, error: mapError } = await supabase
       .from("architect_maps")
       .insert({
         user_id: user.id,
@@ -185,6 +226,13 @@ Rules:
       .select()
       .single()
 
+    if (mapError || !map) {
+      return NextResponse.json(
+        { error: "Failed to create architect map" },
+        { status: 500 }
+      )
+    }
+
     // 🧱 Insert nodes
     const nodeInsertData = normalized.map((n, index) => ({
       map_id: map.id,
@@ -194,12 +242,24 @@ Rules:
       level: index
     }))
 
-    const { data: insertedNodes } = await supabase
+    const { data: insertedNodes, error: insertError } = await supabase
       .from("architect_nodes")
       .insert(nodeInsertData)
       .select()
 
+    if (
+      insertError ||
+      !insertedNodes ||
+      insertedNodes.length !== normalized.length
+    ) {
+      return NextResponse.json(
+        { error: "Failed to insert architect nodes" },
+        { status: 500 }
+      )
+    }
+
     const idLookup: Record<string, string> = {}
+
     normalized.forEach((n, i) => {
       idLookup[n.id] = insertedNodes[i].id
     })
@@ -209,16 +269,27 @@ Rules:
 
     normalized.forEach((node) => {
       node.prerequisites?.forEach((pre) => {
-        edgeInsertData.push({
-          map_id: map.id,
-          prerequisite_id: idLookup[pre],
-          dependent_id: idLookup[node.id]
-        })
+        if (idLookup[pre] && idLookup[node.id]) {
+          edgeInsertData.push({
+            map_id: map.id,
+            prerequisite_id: idLookup[pre],
+            dependent_id: idLookup[node.id]
+          })
+        }
       })
     })
 
     if (edgeInsertData.length) {
-      await supabase.from("architect_edges").insert(edgeInsertData)
+      const { error: edgeError } = await supabase
+        .from("architect_edges")
+        .insert(edgeInsertData)
+
+      if (edgeError) {
+        return NextResponse.json(
+          { error: "Failed to insert edges" },
+          { status: 500 }
+        )
+      }
     }
 
     // 🧠 Initialize stability
@@ -229,7 +300,16 @@ Rules:
       confidence_score: 0
     }))
 
-    await supabase.from("architect_stability").insert(stabilityInit)
+    const { error: stabilityError } = await supabase
+      .from("architect_stability")
+      .insert(stabilityInit)
+
+    if (stabilityError) {
+      return NextResponse.json(
+        { error: "Failed to initialize stability" },
+        { status: 500 }
+      )
+    }
 
     return NextResponse.json({
       source: "generated",
@@ -239,7 +319,10 @@ Rules:
     })
 
   } catch (err) {
-    console.error("Architect error:", err)
-    return NextResponse.json({ error: "Architect failed" }, { status: 500 })
+    console.error("Architect fatal error:", err)
+    return NextResponse.json(
+      { error: "Architect failed" },
+      { status: 500 }
+    )
   }
 }
