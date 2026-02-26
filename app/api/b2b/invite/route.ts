@@ -73,7 +73,8 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const inviteLink = `${process.env.NEXT_PUBLIC_SITE_URL}/auth/accept-invite?token=${token}`
+    const origin = req.headers.get("origin")
+const inviteLink = `${origin}/auth/accept-invite?token=${token}`
 
     return NextResponse.json({
       success: true,
