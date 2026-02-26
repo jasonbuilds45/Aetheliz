@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 type NodeType = {
   id: string;
@@ -16,6 +17,12 @@ type EdgeType = {
   dependent_id: string;
 };
 
+type StabilityType = {
+  node_id: string;
+  stability_state: "stable" | "fragile" | "broken";
+  confidence_score: number;
+};
+
 export default function ArchitectGraph({
   mapId,
   nodes,
@@ -27,10 +34,42 @@ export default function ArchitectGraph({
   edges: EdgeType[];
   onTest?: () => void;
 }) {
+  const supabase = createClientComponentClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [stabilityMap, setStabilityMap] = useState<
+    Record<string, StabilityType>
+  >({});
 
   /* -------------------------------------------------- */
-  /* 1️⃣ Build Adjacency Maps From Edges */
+  /* 1️⃣ Fetch Stability From DB */
+  /* -------------------------------------------------- */
+
+  useEffect(() => {
+    async function fetchStability() {
+      const { data, error } = await supabase
+        .from("architect_stability")
+        .select("node_id, stability_state, confidence_score")
+        .in(
+          "node_id",
+          nodes.map((n) => n.id)
+        );
+
+      if (!error && data) {
+        const map: Record<string, StabilityType> = {};
+        data.forEach((row) => {
+          map[row.node_id] = row;
+        });
+        setStabilityMap(map);
+      }
+    }
+
+    if (nodes.length) {
+      fetchStability();
+    }
+  }, [nodes, supabase]);
+
+  /* -------------------------------------------------- */
+  /* 2️⃣ Build Adjacency Maps */
   /* -------------------------------------------------- */
 
   const { prereqMap, dependentMap } = useMemo(() => {
@@ -51,7 +90,7 @@ export default function ArchitectGraph({
   }, [nodes, edges]);
 
   /* -------------------------------------------------- */
-  /* 2️⃣ Compute Structural Levels (True DAG Logic) */
+  /* 3️⃣ Compute Structural Levels */
   /* -------------------------------------------------- */
 
   const levelMap = useMemo(() => {
@@ -59,14 +98,11 @@ export default function ArchitectGraph({
 
     function computeLevel(id: string): number {
       if (levels[id] !== undefined) return levels[id];
-
       const prereqs = prereqMap[id] || [];
-
       if (!prereqs.length) {
         levels[id] = 0;
         return 0;
       }
-
       const lvl = 1 + Math.max(...prereqs.map(computeLevel));
       levels[id] = lvl;
       return lvl;
@@ -77,72 +113,78 @@ export default function ArchitectGraph({
   }, [nodes, prereqMap]);
 
   /* -------------------------------------------------- */
-  /* 3️⃣ Group By Level */
+  /* 4️⃣ Fragility Propagation */
+  /* -------------------------------------------------- */
+
+  const propagatedState = useMemo(() => {
+    const result: Record<string, "stable" | "fragile" | "broken"> = {};
+
+    // Start with base states
+    nodes.forEach((node) => {
+      result[node.id] =
+        stabilityMap[node.id]?.stability_state || "fragile";
+    });
+
+    // If a node is broken → all downstream become fragile (if not broken)
+    nodes.forEach((node) => {
+      if (result[node.id] === "broken") {
+        propagateDown(node.id);
+      }
+    });
+
+    function propagateDown(id: string) {
+      const dependents = dependentMap[id] || [];
+      dependents.forEach((dep) => {
+        if (result[dep] !== "broken") {
+          result[dep] = "fragile";
+        }
+        propagateDown(dep);
+      });
+    }
+
+    return result;
+  }, [nodes, stabilityMap, dependentMap]);
+
+  /* -------------------------------------------------- */
+  /* 5️⃣ Group By Level */
   /* -------------------------------------------------- */
 
   const grouped = useMemo(() => {
     const groups: Record<number, NodeType[]> = {};
-
     nodes.forEach((node) => {
       const lvl = levelMap[node.id];
       if (!groups[lvl]) groups[lvl] = [];
       groups[lvl].push(node);
     });
-
     return groups;
   }, [nodes, levelMap]);
-
-  const stageLabels = [
-    "Foundation",
-    "Core Structure",
-    "Applied Understanding",
-    "Advanced Extension",
-  ];
-
-  /* -------------------------------------------------- */
-  /* 4️⃣ Relationship Highlighting */
-  /* -------------------------------------------------- */
-
-  const upstream = useMemo(() => {
-    if (!selectedId) return new Set<string>();
-    const visited = new Set<string>();
-
-    function dfs(id: string) {
-      const prereqs = prereqMap[id] || [];
-      prereqs.forEach((p) => {
-        if (!visited.has(p)) {
-          visited.add(p);
-          dfs(p);
-        }
-      });
-    }
-
-    dfs(selectedId);
-    return visited;
-  }, [selectedId, prereqMap]);
-
-  const downstream = useMemo(() => {
-    if (!selectedId) return new Set<string>();
-    const visited = new Set<string>();
-
-    function dfs(id: string) {
-      const dependents = dependentMap[id] || [];
-      dependents.forEach((d) => {
-        if (!visited.has(d)) {
-          visited.add(d);
-          dfs(d);
-        }
-      });
-    }
-
-    dfs(selectedId);
-    return visited;
-  }, [selectedId, dependentMap]);
 
   const selectedNode = nodes.find((n) => n.id === selectedId);
 
   /* -------------------------------------------------- */
-  /* 5️⃣ Render */
+  /* 6️⃣ UI Coloring Logic */
+  /* -------------------------------------------------- */
+
+  function getColorClasses(nodeId: string) {
+    const state = propagatedState[nodeId];
+    const confidence = stabilityMap[nodeId]?.confidence_score || 0;
+
+    if (state === "stable") {
+      return "bg-emerald-50 border-emerald-400";
+    }
+
+    if (state === "broken") {
+      return "bg-rose-50 border-rose-400";
+    }
+
+    // fragile
+    return confidence > 0.6
+      ? "bg-amber-50 border-amber-300"
+      : "bg-orange-50 border-orange-400";
+  }
+
+  /* -------------------------------------------------- */
+  /* 7️⃣ Render */
   /* -------------------------------------------------- */
 
   return (
@@ -153,48 +195,31 @@ export default function ArchitectGraph({
 
         {Object.keys(grouped)
           .sort((a, b) => Number(a) - Number(b))
-          .map((lvlStr, index) => {
+          .map((lvlStr) => {
             const lvl = Number(lvlStr);
-            const stageTitle =
-              stageLabels[index] || `Stage ${index + 1}`;
 
             return (
               <div key={lvl} className="text-center">
 
-                {/* Stage Label */}
                 <div className="mb-8">
                   <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">
-                    {stageTitle}
+                    Level {lvl}
                   </p>
                   <div className="mt-2 h-px bg-indigo-100 w-24 mx-auto" />
                 </div>
 
-                {/* Nodes */}
                 <div className="space-y-6">
                   {grouped[lvl].map((node) => {
                     const isSelected = node.id === selectedId;
-                    const isUpstream = upstream.has(node.id);
-                    const isDownstream = downstream.has(node.id);
-
-                    let bg = "bg-white";
-                    let border = "border-slate-200";
-
-                    if (isSelected) {
-                      bg = "bg-indigo-50";
-                      border = "border-indigo-400";
-                    } else if (isUpstream) {
-                      bg = "bg-emerald-50";
-                      border = "border-emerald-300";
-                    } else if (isDownstream) {
-                      bg = "bg-amber-50";
-                      border = "border-amber-300";
-                    }
+                    const color = getColorClasses(node.id);
 
                     return (
                       <div
                         key={node.id}
                         onClick={() => setSelectedId(node.id)}
-                        className={`${bg} ${border} border rounded-2xl px-8 py-6 max-w-xl mx-auto shadow-sm cursor-pointer transition`}
+                        className={`${color} ${
+                          isSelected ? "ring-2 ring-indigo-400" : ""
+                        } border rounded-2xl px-8 py-6 max-w-xl mx-auto shadow-sm cursor-pointer transition`}
                       >
                         <h3 className="font-semibold text-slate-900">
                           {node.name}
@@ -203,21 +228,10 @@ export default function ArchitectGraph({
                     );
                   })}
                 </div>
-
-                {/* Arrow Between Levels */}
-                {index < Object.keys(grouped).length - 1 && (
-                  <div className="mt-12 flex justify-center">
-                    <div className="flex flex-col items-center text-indigo-400">
-                      <div className="h-8 w-px bg-indigo-200" />
-                      <div className="text-2xl">↓</div>
-                    </div>
-                  </div>
-                )}
               </div>
             );
           })}
 
-        {/* CTA */}
         <div className="text-center pt-10">
           <button
             onClick={onTest}
@@ -238,8 +252,7 @@ export default function ArchitectGraph({
                 {selectedNode.name}
               </h2>
               <p className="text-slate-600 mt-4 leading-relaxed">
-                {selectedNode.description ||
-                  "This module forms a structural component within the overall blueprint."}
+                {selectedNode.description}
               </p>
             </div>
 
