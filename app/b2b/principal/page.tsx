@@ -35,39 +35,39 @@ export default function PrincipalDashboard() {
   }
 
   const handleInvite = async () => {
-  if (!inviteEmail) return
+    if (!inviteEmail) return
 
-  setInviting(true)
+    setInviting(true)
 
-  try {
-    const res = await fetch("/api/b2b/invite", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: inviteEmail,
-        role: inviteRole
+    try {
+      const res = await fetch("/api/b2b/invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: inviteEmail,
+          role: inviteRole
+        })
       })
-    })
 
-    const data = await res.json()
+      const data = await res.json()
 
-    if (!res.ok) {
-      alert(data.error || "Invite failed")
-      return
+      if (!res.ok) {
+        alert(data.error || "Invite failed")
+        return
+      }
+
+      if (data.invite_link) {
+        setGeneratedLink(data.invite_link)
+      }
+
+    } catch {
+      alert("Something went wrong")
     }
 
-    if (data.invite_link) {
-      setGeneratedLink(data.invite_link)
-    }
-
-  } catch {
-    alert("Something went wrong")
+    setInviteEmail("")
+    setInviteOpen(false)
+    setInviting(false)
   }
-
-  setInviteEmail("")
-  setInviteOpen(false)
-  setInviting(false)
-}
 
   const teachers = members.filter(m => m.role === "teacher")
   const students = members.filter(m => m.role === "student")
@@ -200,50 +200,48 @@ export default function PrincipalDashboard() {
         </div>
       )}
 
+      {/* Generated Link Modal */}
+      {generatedLink && (
+        <div className="fixed inset-0 bg-black/20 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 w-full max-w-lg shadow-lg space-y-6">
+            <h2 className="text-lg font-semibold text-slate-900">
+              Invite Link Generated
+            </h2>
+
+            <p className="text-sm text-slate-500">
+              Share this link with the invited member:
+            </p>
+
+            <div className="flex gap-2">
+              <input
+                value={generatedLink}
+                readOnly
+                className="flex-1 border border-slate-300 px-4 py-3 rounded-lg text-sm text-slate-700"
+              />
+
+              <button
+                onClick={() => navigator.clipboard.writeText(generatedLink)}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition"
+              >
+                Copy
+              </button>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={() => setGeneratedLink(null)}
+                className="px-5 py-2 text-sm text-slate-600 hover:text-slate-900"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
-
-{/* Generated Link Modal */}
-{generatedLink && (
-  <div className="fixed inset-0 bg-black/20 flex items-center justify-center z-50">
-    <div className="bg-white rounded-2xl p-8 w-full max-w-lg shadow-lg space-y-6">
-      <h2 className="text-lg font-semibold text-slate-900">
-        Invite Link Generated
-      </h2>
-
-      <p className="text-sm text-slate-500">
-        Share this link with the invited member:
-      </p>
-
-      <div className="flex gap-2">
-        <input
-          value={generatedLink}
-          readOnly
-          className="flex-1 border border-slate-300 px-4 py-3 rounded-lg text-sm text-slate-700"
-        />
-
-        <button
-          onClick={() => {
-            navigator.clipboard.writeText(generatedLink)
-          }}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition"
-        >
-          Copy
-        </button>
-      </div>
-
-      <div className="flex justify-end">
-        <button
-          onClick={() => setGeneratedLink(null)}
-          className="px-5 py-2 text-sm text-slate-600 hover:text-slate-900"
-        >
-          Close
-        </button>
-      </div>
-    </div>
-  </div>
-)}
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
