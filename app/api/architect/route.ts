@@ -102,11 +102,17 @@ export async function POST(req: NextRequest) {
       .maybeSingle()
 
     if (existingError) {
-      return NextResponse.json(
-        { error: "Failed to check existing maps" },
-        { status: 500 }
-      )
-    }
+  console.error("Existing map check error:", existingError)
+
+  return NextResponse.json(
+    { 
+      error: "Failed to check existing maps",
+      details: existingError.message,
+      code: existingError.code
+    },
+    { status: 500 }
+  )
+}
 
     if (existingMap) {
       const { data: nodes } = await supabase
