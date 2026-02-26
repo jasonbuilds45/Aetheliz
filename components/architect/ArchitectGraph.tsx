@@ -6,53 +6,89 @@ type NodeType = {
   id: string;
   name: string;
   description?: string;
-  prerequisites?: string[];
+  inclusion_reasoning?: string;
+  level?: number;
+};
+
+type EdgeType = {
+  id?: string;
+  prerequisite_id: string;
+  dependent_id: string;
 };
 
 export default function ArchitectGraph({
+  mapId,
   nodes,
+  edges,
   onTest,
 }: {
+  mapId: string;
   nodes: NodeType[];
+  edges: EdgeType[];
   onTest?: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   /* -------------------------------------------------- */
-  /* 1️⃣ Compute Structural Levels */
+  /* 1️⃣ Build Adjacency Maps From Edges */
+  /* -------------------------------------------------- */
+
+  const { prereqMap, dependentMap } = useMemo(() => {
+    const prereq: Record<string, string[]> = {};
+    const dependent: Record<string, string[]> = {};
+
+    nodes.forEach((n) => {
+      prereq[n.id] = [];
+      dependent[n.id] = [];
+    });
+
+    edges.forEach((e) => {
+      prereq[e.dependent_id]?.push(e.prerequisite_id);
+      dependent[e.prerequisite_id]?.push(e.dependent_id);
+    });
+
+    return { prereqMap: prereq, dependentMap: dependent };
+  }, [nodes, edges]);
+
+  /* -------------------------------------------------- */
+  /* 2️⃣ Compute Structural Levels (True DAG Logic) */
   /* -------------------------------------------------- */
 
   const levelMap = useMemo(() => {
-    const map: Record<string, number> = {};
+    const levels: Record<string, number> = {};
 
-    function getLevel(id: string): number {
-      if (map[id] !== undefined) return map[id];
-      const node = nodes.find((n) => n.id === id);
-      if (!node || !node.prerequisites?.length) {
-        map[id] = 0;
+    function computeLevel(id: string): number {
+      if (levels[id] !== undefined) return levels[id];
+
+      const prereqs = prereqMap[id] || [];
+
+      if (!prereqs.length) {
+        levels[id] = 0;
         return 0;
       }
-      const level =
-        1 + Math.max(...node.prerequisites.map((p) => getLevel(p)));
-      map[id] = level;
-      return level;
+
+      const lvl = 1 + Math.max(...prereqs.map(computeLevel));
+      levels[id] = lvl;
+      return lvl;
     }
 
-    nodes.forEach((node) => getLevel(node.id));
-    return map;
-  }, [nodes]);
+    nodes.forEach((n) => computeLevel(n.id));
+    return levels;
+  }, [nodes, prereqMap]);
 
   /* -------------------------------------------------- */
-  /* 2️⃣ Group By Stage */
+  /* 3️⃣ Group By Level */
   /* -------------------------------------------------- */
 
   const grouped = useMemo(() => {
     const groups: Record<number, NodeType[]> = {};
+
     nodes.forEach((node) => {
       const lvl = levelMap[node.id];
       if (!groups[lvl]) groups[lvl] = [];
       groups[lvl].push(node);
     });
+
     return groups;
   }, [nodes, levelMap]);
 
@@ -64,7 +100,7 @@ export default function ArchitectGraph({
   ];
 
   /* -------------------------------------------------- */
-  /* 3️⃣ Relationship Detection */
+  /* 4️⃣ Relationship Highlighting */
   /* -------------------------------------------------- */
 
   const upstream = useMemo(() => {
@@ -72,8 +108,8 @@ export default function ArchitectGraph({
     const visited = new Set<string>();
 
     function dfs(id: string) {
-      const node = nodes.find((n) => n.id === id);
-      node?.prerequisites?.forEach((p) => {
+      const prereqs = prereqMap[id] || [];
+      prereqs.forEach((p) => {
         if (!visited.has(p)) {
           visited.add(p);
           dfs(p);
@@ -83,31 +119,30 @@ export default function ArchitectGraph({
 
     dfs(selectedId);
     return visited;
-  }, [selectedId, nodes]);
+  }, [selectedId, prereqMap]);
 
   const downstream = useMemo(() => {
     if (!selectedId) return new Set<string>();
     const visited = new Set<string>();
 
     function dfs(id: string) {
-      nodes.forEach((n) => {
-        if (n.prerequisites?.includes(id)) {
-          if (!visited.has(n.id)) {
-            visited.add(n.id);
-            dfs(n.id);
-          }
+      const dependents = dependentMap[id] || [];
+      dependents.forEach((d) => {
+        if (!visited.has(d)) {
+          visited.add(d);
+          dfs(d);
         }
       });
     }
 
     dfs(selectedId);
     return visited;
-  }, [selectedId, nodes]);
+  }, [selectedId, dependentMap]);
 
   const selectedNode = nodes.find((n) => n.id === selectedId);
 
   /* -------------------------------------------------- */
-  /* 4️⃣ Render Blueprint */
+  /* 5️⃣ Render */
   /* -------------------------------------------------- */
 
   return (
@@ -169,9 +204,8 @@ export default function ArchitectGraph({
                   })}
                 </div>
 
-                {/* Arrow Between Stages */}
-                {index <
-                  Object.keys(grouped).length - 1 && (
+                {/* Arrow Between Levels */}
+                {index < Object.keys(grouped).length - 1 && (
                   <div className="mt-12 flex justify-center">
                     <div className="flex flex-col items-center text-indigo-400">
                       <div className="h-8 w-px bg-indigo-200" />
@@ -205,38 +239,29 @@ export default function ArchitectGraph({
               </h2>
               <p className="text-slate-600 mt-4 leading-relaxed">
                 {selectedNode.description ||
-                  "This module forms a structural component within the overall curriculum blueprint."}
+                  "This module forms a structural component within the overall blueprint."}
               </p>
             </div>
 
-            <div className="pt-6 border-t border-indigo-100">
-              <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">
-                Why It Depends on Others
-              </p>
-              <p className="text-sm text-slate-600 mt-3 leading-relaxed">
-                This concept builds directly upon its prerequisite modules.
-                Weak foundational understanding will propagate upward and
-                reduce conceptual stability at this level.
-              </p>
-            </div>
-
-            <div className="pt-6 border-t border-indigo-100">
-              <p className="text-xs font-bold uppercase tracking-widest text-amber-600">
-                What It Enables
-              </p>
-              <p className="text-sm text-slate-600 mt-3 leading-relaxed">
-                Once mastered, this module unlocks more advanced structural
-                reasoning in subsequent curriculum layers.
-              </p>
-            </div>
+            {selectedNode.inclusion_reasoning && (
+              <div className="pt-6 border-t border-indigo-100">
+                <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">
+                  Inclusion Reasoning
+                </p>
+                <p className="text-sm text-slate-600 mt-3 leading-relaxed">
+                  {selectedNode.inclusion_reasoning}
+                </p>
+              </div>
+            )}
 
             <div className="pt-6 border-t border-indigo-100">
               <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
                 Direct Prerequisites
               </p>
+
               <div className="mt-3 space-y-2">
-                {selectedNode.prerequisites?.length ? (
-                  selectedNode.prerequisites.map((pre) => (
+                {(prereqMap[selectedNode.id] || []).length ? (
+                  prereqMap[selectedNode.id].map((pre) => (
                     <div
                       key={pre}
                       className="px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700"

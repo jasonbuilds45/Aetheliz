@@ -3,23 +3,23 @@ import { createServerClient } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import crypto from "crypto"
 
-type NodeType = {
+type GeminiNode = {
   id: string
   name: string
   description?: string
+  inclusion_reasoning?: string
   prerequisites?: string[]
 }
 
-function validateAndNormalizeGraph(nodes: any[]): NodeType[] | null {
+function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
   if (!Array.isArray(nodes) || nodes.length === 0) return null
-  if (nodes.length > 10) return null
+  if (nodes.length > 15) return null
 
-  const normalized: NodeType[] = []
+  const normalized: GeminiNode[] = []
   const idMap = new Map<string, string>()
 
   nodes.forEach((node, index) => {
     if (!node?.id || !node?.name) return
-
     const newId = `n${index + 1}`
     idMap.set(node.id, newId)
 
@@ -27,6 +27,7 @@ function validateAndNormalizeGraph(nodes: any[]): NodeType[] | null {
       id: newId,
       name: String(node.name).trim(),
       description: node.description || "",
+      inclusion_reasoning: node.inclusion_reasoning || "",
       prerequisites: []
     })
   })
@@ -36,41 +37,10 @@ function validateAndNormalizeGraph(nodes: any[]): NodeType[] | null {
       ? node.prerequisites
       : []
 
-    if (!normalized[index]) return
-
     normalized[index].prerequisites = prereqs
       .map((p: string) => idMap.get(p))
       .filter(Boolean) as string[]
   })
-
-  for (const node of normalized) {
-    if (node.prerequisites?.includes(node.id)) return null
-  }
-
-  const visited = new Set<string>()
-  const stack = new Set<string>()
-
-  function dfs(nodeId: string): boolean {
-    if (stack.has(nodeId)) return true
-    if (visited.has(nodeId)) return false
-
-    visited.add(nodeId)
-    stack.add(nodeId)
-
-    const node = normalized.find(n => n.id === nodeId)
-    if (!node) return false
-
-    for (const dep of node.prerequisites || []) {
-      if (dfs(dep)) return true
-    }
-
-    stack.delete(nodeId)
-    return false
-  }
-
-  for (const node of normalized) {
-    if (dfs(node.id)) return null
-  }
 
   return normalized
 }
@@ -80,28 +50,14 @@ export async function POST(req: NextRequest) {
     const { topic, education_stage } = await req.json()
 
     if (!topic || !education_stage) {
-      return NextResponse.json(
-        { error: "Missing parameters" },
-        { status: 400 }
-      )
-    }
-
-    if (
-      !process.env.NEXT_PUBLIC_SUPABASE_URL ||
-      !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-      !process.env.GEMINI_API_KEY
-    ) {
-      return NextResponse.json(
-        { error: "Server environment variables missing" },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: "Missing parameters" }, { status: 400 })
     }
 
     const cookieStore = cookies()
 
     const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         cookies: {
           get(name: string) {
@@ -113,21 +69,45 @@ export async function POST(req: NextRequest) {
       }
     )
 
+    // 🔐 Require authenticated user
+    const {
+      data: { user },
+      error: authError
+    } = await supabase.auth.getUser()
+
+    if (!user || authError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
     const hash = crypto
       .createHash("sha256")
       .update(`${topic.toLowerCase()}::${education_stage}`)
       .digest("hex")
 
-    const { data: cached } = await supabase
-      .from("topic_graphs")
-      .select("nodes")
+    // 🔎 Check if map already exists
+    const { data: existingMap } = await supabase
+      .from("architect_maps")
+      .select("*")
+      .eq("user_id", user.id)
       .eq("hash", hash)
       .maybeSingle()
 
-    if (cached?.nodes) {
+    if (existingMap) {
+      const { data: nodes } = await supabase
+        .from("architect_nodes")
+        .select("*")
+        .eq("map_id", existingMap.id)
+
+      const { data: edges } = await supabase
+        .from("architect_edges")
+        .select("*")
+        .eq("map_id", existingMap.id)
+
       return NextResponse.json({
-        source: "cache",
-        graph: cached.nodes
+        source: "existing",
+        map_id: existingMap.id,
+        nodes,
+        edges
       })
     }
 
@@ -149,21 +129,15 @@ export async function POST(req: NextRequest) {
 You are a curriculum decomposition engine.
 
 Return ONLY valid JSON.
-No markdown.
-No backticks.
-No explanations.
-Only JSON.
 
-Decompose "${topic}" for level "${education_stage}".
-
-Return format:
-
+Format:
 {
   "nodes": [
     {
       "id": "x",
       "name": "Concept",
       "description": "Short explanation",
+      "inclusion_reasoning": "Why this concept is structurally required",
       "prerequisites": []
     }
   ]
@@ -172,7 +146,9 @@ Return format:
 Rules:
 - Atomic conceptual units
 - Directed acyclic graph
-- Maximum 10 nodes
+- Maximum 15 nodes
+- Logical structural dependency
+- Educationally coherent
 `
                 }
               ]
@@ -182,79 +158,88 @@ Rules:
       }
     )
 
-    if (!geminiResponse.ok) {
-      const errorText = await geminiResponse.text()
-      return NextResponse.json(
-        {
-          error: "Gemini API request failed",
-          status: geminiResponse.status,
-          details: errorText
-        },
-        { status: 500 }
-      )
-    }
-
     const geminiData = await geminiResponse.json()
-
-    const raw =
-      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
-
-    if (!raw) {
-      return NextResponse.json(
-        { error: "Gemini returned empty response" },
-        { status: 500 }
-      )
-    }
+    const raw = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
-
     if (!jsonMatch) {
-      return NextResponse.json(
-        { error: "No valid JSON found in Gemini output" },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: "Invalid AI response" }, { status: 500 })
     }
 
-    let parsed: any
-    try {
-      parsed = JSON.parse(jsonMatch[0])
-    } catch {
-      return NextResponse.json(
-        { error: "Malformed JSON from Gemini" },
-        { status: 500 }
-      )
-    }
-
+    const parsed = JSON.parse(jsonMatch[0])
     const normalized = validateAndNormalizeGraph(parsed.nodes)
 
     if (!normalized) {
-      return NextResponse.json(
-        { error: "Invalid or cyclic graph generated" },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: "Invalid graph structure" }, { status: 500 })
     }
 
-    await supabase.from("topic_graphs").insert({
-      topic,
-      education_stage,
-      hash,
-      nodes: normalized
+    // 🧱 Create map
+    const { data: map } = await supabase
+      .from("architect_maps")
+      .insert({
+        user_id: user.id,
+        topic,
+        education_stage,
+        hash
+      })
+      .select()
+      .single()
+
+    // 🧱 Insert nodes
+    const nodeInsertData = normalized.map((n, index) => ({
+      map_id: map.id,
+      name: n.name,
+      description: n.description,
+      inclusion_reasoning: n.inclusion_reasoning,
+      level: index
+    }))
+
+    const { data: insertedNodes } = await supabase
+      .from("architect_nodes")
+      .insert(nodeInsertData)
+      .select()
+
+    const idLookup: Record<string, string> = {}
+    normalized.forEach((n, i) => {
+      idLookup[n.id] = insertedNodes[i].id
     })
+
+    // 🧱 Insert edges
+    const edgeInsertData: any[] = []
+
+    normalized.forEach((node) => {
+      node.prerequisites?.forEach((pre) => {
+        edgeInsertData.push({
+          map_id: map.id,
+          prerequisite_id: idLookup[pre],
+          dependent_id: idLookup[node.id]
+        })
+      })
+    })
+
+    if (edgeInsertData.length) {
+      await supabase.from("architect_edges").insert(edgeInsertData)
+    }
+
+    // 🧠 Initialize stability
+    const stabilityInit = insertedNodes.map((node) => ({
+      user_id: user.id,
+      node_id: node.id,
+      stability_state: "fragile",
+      confidence_score: 0
+    }))
+
+    await supabase.from("architect_stability").insert(stabilityInit)
 
     return NextResponse.json({
       source: "generated",
-      graph: normalized
+      map_id: map.id,
+      nodes: insertedNodes,
+      edges: edgeInsertData
     })
 
-  } catch (error) {
-    console.error("Architect fatal error:", error)
-
-    return NextResponse.json(
-      {
-        error: "Architect generation failed",
-        details: String(error)
-      },
-      { status: 500 }
-    )
+  } catch (err) {
+    console.error("Architect error:", err)
+    return NextResponse.json({ error: "Architect failed" }, { status: 500 })
   }
 }
