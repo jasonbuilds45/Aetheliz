@@ -46,8 +46,9 @@ function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
     if (!normalized[index]) return
 
     normalized[index].prerequisites = prereqs
-      .map((p: string) => idMap.get(p))
-      .filter((p): p is string => !!p && p !== normalized[index].id)
+  .map((p: string) => idMap.get(p))
+  .filter((p: string | undefined): p is string => {
+    return !!p && p !== normalized[index].id
   })
 
   // 3️⃣ Detect Cycles (DFS)
