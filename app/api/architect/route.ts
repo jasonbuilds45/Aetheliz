@@ -257,8 +257,7 @@ if (!parsed?.nodes) {
   return NextResponse.json(
     {
       error: "Failed to create architect map",
-      details: mapError?.message,
-      code: mapError?.code
+      details: mapError,
     },
     { status: 500 }
   )
