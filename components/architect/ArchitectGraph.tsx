@@ -39,6 +39,7 @@ type StabilityType = {
 };
 
 export default function ArchitectGraph({
+  mapId,
   nodes,
   edges,
   onTest,
