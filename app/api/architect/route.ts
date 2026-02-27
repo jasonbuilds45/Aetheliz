@@ -188,28 +188,47 @@ Rules:
     }
 
     const geminiData = await geminiResponse.json()
-    const raw =
-      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
+let raw =
+  geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
+
+if (!raw) {
+  return NextResponse.json(
+    { error: "Empty response from AI" },
+    { status: 500 }
+  )
+}
+
+// Remove markdown code blocks if present
+raw = raw.replace(/```json/gi, "")
+raw = raw.replace(/```/g, "")
+raw = raw.trim()
+
+// Attempt safe JSON extraction
+let parsed: any
+
+try {
+  parsed = JSON.parse(raw)
+} catch {
+  try {
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) throw new Error("No JSON block found")
+    parsed = JSON.parse(jsonMatch[0])
+  } catch (err) {
+    console.error("AI raw output:", raw)
+    return NextResponse.json(
+      { error: "Malformed JSON from AI", details: "AI returned invalid structure" },
+      { status: 500 }
+    )
+  }
+}
 
-    if (!jsonMatch) {
-      return NextResponse.json(
-        { error: "Invalid AI response" },
-        { status: 500 }
-      )
-    }
-
-    let parsed: any
-
-    try {
-      parsed = JSON.parse(jsonMatch[0])
-    } catch {
-      return NextResponse.json(
-        { error: "Malformed JSON from AI" },
-        { status: 500 }
-      )
-    }
+if (!parsed?.nodes) {
+  return NextResponse.json(
+    { error: "AI did not return nodes array" },
+    { status: 500 }
+  )
+}
 
     const normalized = validateAndNormalizeGraph(parsed.nodes)
 
