@@ -52,7 +52,7 @@ function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
       })
   })
 
-  // Cycle detection (DFS)
+  // Cycle detection
   const visited = new Set<string>()
   const stack = new Set<string>()
 
@@ -197,37 +197,29 @@ export async function POST(req: NextRequest) {
             {
               parts: [
                 {
-                  text: `
-You are a curriculum decomposition engine.
-
-Decompose the topic: "${topic}"
-For education level: "${education_stage}"
-
-Return ONLY valid JSON.
-
-Format:
-{
-  "nodes": [
-    {
-      "id": "x",
-      "name": "Concept",
-      "description": "Short explanation",
-      "inclusion_reasoning": "Why this concept is structurally required",
-      "prerequisites": []
-    }
-  ]
-}
-
-Rules:
-- Maximum 8 nodes.
-- Each node must be a major conceptual pillar.
-- Maintain consistent abstraction level.
-- Strict Directed Acyclic Graph.
-- No cycles.
-- No unrelated topics.
-- Everything must directly relate to "${topic}".
-`
-`
+                  text:
+                    "You are a curriculum decomposition engine.\n\n" +
+                    "Decompose the topic: " + topic + "\n" +
+                    "For education level: " + education_stage + "\n\n" +
+                    "Return ONLY valid JSON.\n\n" +
+                    "Format:\n" +
+                    "{\n" +
+                    '  "nodes": [\n' +
+                    "    {\n" +
+                    '      "id": "x",\n' +
+                    '      "name": "Concept",\n' +
+                    '      "description": "Short explanation",\n' +
+                    '      "inclusion_reasoning": "Why this concept is structurally required",\n' +
+                    '      "prerequisites": []\n' +
+                    "    }\n" +
+                    "  ]\n" +
+                    "}\n\n" +
+                    "Rules:\n" +
+                    "- Maximum 8 nodes\n" +
+                    "- Strict Directed Acyclic Graph\n" +
+                    "- No cycles\n" +
+                    "- No unrelated topics\n" +
+                    "- All nodes must directly relate to the given topic\n"
                 }
               ]
             }
@@ -247,7 +239,7 @@ Rules:
     let raw =
       geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
-    raw = raw.replace(/```json/gi, "").replace(/```/g, "").trim()
+    raw = raw.replace(/```/g, "").trim()
 
     let parsed: any
 
@@ -280,7 +272,6 @@ Rules:
       )
     }
 
-    // Insert map
     const { data: map, error: mapError } = await supabase
       .from("architect_maps")
       .insert({
@@ -299,7 +290,6 @@ Rules:
       )
     }
 
-    // Insert nodes
     const nodeInsertData = normalized.map((n, index) => ({
       map_id: map.id,
       name: n.name,
