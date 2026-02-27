@@ -169,7 +169,12 @@ export default function ArchitectGraph({
           </div>
         </div>
 
-        <ReactFlow nodes={flowNodes} edges={flowEdges} fitView padding={0.2}>
+        <ReactFlow
+  nodes={flowNodes}
+  edges={flowEdges}
+  fitView
+  fitViewOptions={{ padding: 0.2 }}
+>
           <Background color="#e2e8f0" variant={BackgroundVariant.Dots} gap={24} />
           <Controls className="bg-white border-slate-200 shadow-sm rounded-lg" />
           <MiniMap nodeStrokeWidth={3} maskColor="rgba(241, 245, 249, 0.4)" />
