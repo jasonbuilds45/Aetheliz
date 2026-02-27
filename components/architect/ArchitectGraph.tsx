@@ -1,6 +1,15 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import ReactFlow, {
+  Background,
+  Controls,
+  MiniMap,
+  Node,
+  Edge,
+  MarkerType,
+} from "reactflow";
+import "reactflow/dist/style.css";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -13,7 +22,6 @@ type NodeType = {
   name: string;
   description?: string;
   inclusion_reasoning?: string;
-  level?: number;
 };
 
 type EdgeType = {
@@ -39,7 +47,7 @@ export default function ArchitectGraph({
   edges: EdgeType[];
   onTest?: () => void;
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<NodeType | null>(null);
   const [stabilityMap, setStabilityMap] = useState<
     Record<string, StabilityType>
   >({});
@@ -50,17 +58,12 @@ export default function ArchitectGraph({
 
   useEffect(() => {
     async function fetchStability() {
-      if (!nodes.length) return;
-
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from("architect_stability")
         .select("node_id, stability_state, confidence_score")
-        .in(
-          "node_id",
-          nodes.map((n) => n.id)
-        );
+        .in("node_id", nodes.map((n) => n.id));
 
-      if (!error && data) {
+      if (data) {
         const map: Record<string, StabilityType> = {};
         data.forEach((row) => {
           map[row.node_id] = row;
@@ -69,57 +72,11 @@ export default function ArchitectGraph({
       }
     }
 
-    fetchStability();
+    if (nodes.length) fetchStability();
   }, [nodes]);
 
   /* -------------------------------------------------- */
-  /* 2️⃣ Build Adjacency Maps */
-  /* -------------------------------------------------- */
-
-  const { prereqMap, dependentMap } = useMemo(() => {
-    const prereq: Record<string, string[]> = {};
-    const dependent: Record<string, string[]> = {};
-
-    nodes.forEach((n) => {
-      prereq[n.id] = [];
-      dependent[n.id] = [];
-    });
-
-    edges.forEach((e) => {
-      prereq[e.dependent_id]?.push(e.prerequisite_id);
-      dependent[e.prerequisite_id]?.push(e.dependent_id);
-    });
-
-    return { prereqMap: prereq, dependentMap: dependent };
-  }, [nodes, edges]);
-
-  /* -------------------------------------------------- */
-  /* 3️⃣ Compute Structural Levels */
-  /* -------------------------------------------------- */
-
-  const levelMap = useMemo(() => {
-    const levels: Record<string, number> = {};
-
-    function computeLevel(id: string): number {
-      if (levels[id] !== undefined) return levels[id];
-
-      const prereqs = prereqMap[id] || [];
-      if (!prereqs.length) {
-        levels[id] = 0;
-        return 0;
-      }
-
-      const lvl = 1 + Math.max(...prereqs.map(computeLevel));
-      levels[id] = lvl;
-      return lvl;
-    }
-
-    nodes.forEach((n) => computeLevel(n.id));
-    return levels;
-  }, [nodes, prereqMap]);
-
-  /* -------------------------------------------------- */
-  /* 4️⃣ Fragility Propagation */
+  /* 2️⃣ Stability Propagation */
   /* -------------------------------------------------- */
 
   const propagatedState = useMemo(() => {
@@ -131,13 +88,14 @@ export default function ArchitectGraph({
     });
 
     function propagateDown(id: string) {
-      const dependents = dependentMap[id] || [];
-      dependents.forEach((dep) => {
-        if (result[dep] !== "broken") {
-          result[dep] = "fragile";
-        }
-        propagateDown(dep);
-      });
+      edges
+        .filter((e) => e.prerequisite_id === id)
+        .forEach((edge) => {
+          if (result[edge.dependent_id] !== "broken") {
+            result[edge.dependent_id] = "fragile";
+          }
+          propagateDown(edge.dependent_id);
+        });
     }
 
     nodes.forEach((node) => {
@@ -147,93 +105,117 @@ export default function ArchitectGraph({
     });
 
     return result;
-  }, [nodes, stabilityMap, dependentMap]);
+  }, [nodes, edges, stabilityMap]);
 
   /* -------------------------------------------------- */
-  /* 5️⃣ Group By Level */
+  /* 3️⃣ Convert To ReactFlow Format */
   /* -------------------------------------------------- */
 
-  const grouped = useMemo(() => {
-    const groups: Record<number, NodeType[]> = {};
-    nodes.forEach((node) => {
-      const lvl = levelMap[node.id];
-      if (!groups[lvl]) groups[lvl] = [];
-      groups[lvl].push(node);
+  const flowNodes: Node[] = useMemo(() => {
+    return nodes.map((node, index) => {
+      const state = propagatedState[node.id];
+
+      let background = "#fef3c7";
+      let border = "#f59e0b";
+
+      if (state === "stable") {
+        background = "#ecfdf5";
+        border = "#10b981";
+      }
+
+      if (state === "broken") {
+        background = "#fef2f2";
+        border = "#ef4444";
+      }
+
+      return {
+        id: node.id,
+        position: {
+          x: Math.random() * 600,
+          y: Math.random() * 400,
+        },
+        data: {
+          label: (
+            <div
+              className="px-4 py-3 rounded-xl border shadow-sm text-sm font-semibold cursor-pointer"
+              style={{
+                background,
+                borderColor: border,
+                borderWidth: 2,
+              }}
+              onClick={() => setSelectedNode(node)}
+            >
+              {node.name}
+            </div>
+          ),
+        },
+      };
     });
-    return groups;
-  }, [nodes, levelMap]);
+  }, [nodes, propagatedState]);
 
-  const selectedNode = nodes.find((n) => n.id === selectedId);
-
-  function getColorClasses(nodeId: string) {
-    const state = propagatedState[nodeId];
-    const confidence = stabilityMap[nodeId]?.confidence_score || 0;
-
-    if (state === "stable") {
-      return "bg-emerald-50 border-emerald-400";
-    }
-
-    if (state === "broken") {
-      return "bg-rose-50 border-rose-400";
-    }
-
-    return confidence > 0.6
-      ? "bg-amber-50 border-amber-300"
-      : "bg-orange-50 border-orange-400";
-  }
+  const flowEdges: Edge[] = useMemo(() => {
+    return edges.map((edge) => ({
+      id: edge.id || `${edge.prerequisite_id}-${edge.dependent_id}`,
+      source: edge.prerequisite_id,
+      target: edge.dependent_id,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+      },
+      style: {
+        strokeWidth: 2,
+      },
+    }));
+  }, [edges]);
 
   /* -------------------------------------------------- */
-  /* 6️⃣ Render */
+  /* 4️⃣ Render */
   /* -------------------------------------------------- */
 
   return (
-    <div className="space-y-16">
+    <div className="grid grid-cols-4 gap-8 h-[700px]">
 
-      {Object.keys(grouped)
-        .sort((a, b) => Number(a) - Number(b))
-        .map((lvlStr) => {
-          const lvl = Number(lvlStr);
+      {/* Graph */}
+      <div className="col-span-3 bg-white rounded-xl border shadow-sm">
+        <ReactFlow
+          nodes={flowNodes}
+          edges={flowEdges}
+          fitView
+        >
+          <Background />
+          <Controls />
+          <MiniMap />
+        </ReactFlow>
+      </div>
 
-          return (
-            <div key={lvl} className="text-center space-y-6">
-              <p className="text-xs font-bold uppercase tracking-widest text-indigo-600">
-                Level {lvl}
-              </p>
+      {/* Info Panel */}
+      <div className="bg-white rounded-xl border p-6 shadow-sm overflow-y-auto">
+        {selectedNode ? (
+          <>
+            <h2 className="text-lg font-bold">
+              {selectedNode.name}
+            </h2>
 
-              {grouped[lvl].map((node) => (
-                <div
-                  key={node.id}
-                  onClick={() => setSelectedId(node.id)}
-                  className={`${getColorClasses(node.id)} border rounded-xl px-6 py-4 max-w-xl mx-auto shadow-sm cursor-pointer transition`}
-                >
-                  <h3 className="font-semibold text-slate-900">
-                    {node.name}
-                  </h3>
-                </div>
-              ))}
-            </div>
-          );
-        })}
+            <p className="mt-4 text-sm text-slate-600">
+              {selectedNode.description}
+            </p>
 
-      {selectedNode && (
-        <div className="mt-12 p-6 bg-slate-50 rounded-xl border">
-          <h2 className="text-xl font-bold">{selectedNode.name}</h2>
-          <p className="mt-4 text-sm text-slate-600">
-            {selectedNode.description}
+            {selectedNode.inclusion_reasoning && (
+              <>
+                <p className="mt-6 text-xs uppercase tracking-widest text-indigo-600 font-bold">
+                  Inclusion Reasoning
+                </p>
+                <p className="mt-2 text-sm text-slate-600">
+                  {selectedNode.inclusion_reasoning}
+                </p>
+              </>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-slate-400 italic">
+            Select a node to inspect its structural role.
           </p>
-
-          {selectedNode.inclusion_reasoning && (
-            <div className="mt-6">
-              <p className="text-xs uppercase tracking-widest text-indigo-600 font-bold">
-                Inclusion Reasoning
-              </p>
-              <p className="mt-2 text-sm text-slate-600">
-                {selectedNode.inclusion_reasoning}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
