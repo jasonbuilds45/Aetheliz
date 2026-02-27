@@ -200,13 +200,33 @@ export async function POST(req: NextRequest) {
                   text: `
 You are a curriculum decomposition engine.
 
+Decompose the topic: "${topic}"
+For education level: "${education_stage}"
+
 Return ONLY valid JSON.
 
+Format:
+{
+  "nodes": [
+    {
+      "id": "x",
+      "name": "Concept",
+      "description": "Short explanation",
+      "inclusion_reasoning": "Why this concept is structurally required",
+      "prerequisites": []
+    }
+  ]
+}
+
 Rules:
-- Strict Directed Acyclic Graph
-- No cycles
-- No mutual prerequisites
-- Maximum 12 nodes
+- Maximum 8 nodes.
+- Each node must be a major conceptual pillar.
+- Maintain consistent abstraction level.
+- Strict Directed Acyclic Graph.
+- No cycles.
+- No unrelated topics.
+- Everything must directly relate to "${topic}".
+`
 `
                 }
               ]
