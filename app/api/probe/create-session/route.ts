@@ -69,7 +69,9 @@ export async function POST(req: NextRequest) {
     }
 
     const architectData = await architectRes.json()
-    const graph = architectData.graph
+    const graph = Array.isArray(architectData)
+  ? architectData
+  : architectData.graph
 
     if (!graph || !Array.isArray(graph)) {
       return NextResponse.json(

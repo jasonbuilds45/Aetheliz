@@ -48,6 +48,7 @@ function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
       .filter((p): p is string => typeof p === "string" && p !== normalized[index].id)
   })
 
+  // Cycle detection
   const visited = new Set<string>()
   const stack = new Set<string>()
 
@@ -85,7 +86,10 @@ export async function POST(req: NextRequest) {
     const { topic, education_stage } = await req.json()
 
     if (!topic || !education_stage) {
-      return NextResponse.json({ error: "Missing parameters" }, { status: 400 })
+      return NextResponse.json(
+        { error: "Missing parameters" },
+        { status: 400 }
+      )
     }
 
     const cookieStore = cookies()
@@ -110,10 +114,15 @@ export async function POST(req: NextRequest) {
     } = await supabase.auth.getUser()
 
     if (!user || authError) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      )
     }
 
-    /* 🔥 CACHE REMOVED — ALWAYS GENERATE FRESH */
+    /* =========================================================
+       CALL GEMINI
+    ========================================================= */
 
     const geminiResponse = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
@@ -134,9 +143,6 @@ export async function POST(req: NextRequest) {
                     "Education Level: " + education_stage + "\n\n" +
                     "Return ONLY valid JSON.\n\n" +
                     "CRITICAL:\n" +
-                    "- All concepts MUST directly relate to the topic.\n" +
-                    "- If the topic is biology, DO NOT include programming.\n" +
-                    "- If the topic is physics, DO NOT include unrelated domains.\n" +
                     "- Maximum 8 major conceptual pillars.\n" +
                     "- Strict Directed Acyclic Graph.\n" +
                     "- No cycles.\n\n" +
@@ -147,7 +153,7 @@ export async function POST(req: NextRequest) {
                     '      "id": "x",\n' +
                     '      "name": "Concept",\n' +
                     '      "description": "Short explanation",\n' +
-                    '      "inclusion_reasoning": "Why this concept is required",\n' +
+                    '      "inclusion_reasoning": "Why required",\n' +
                     '      "prerequisites": []\n' +
                     "    }\n" +
                     "  ]\n" +
@@ -161,7 +167,10 @@ export async function POST(req: NextRequest) {
     )
 
     if (!geminiResponse.ok) {
-      return NextResponse.json({ error: "Gemini API failed" }, { status: 500 })
+      return NextResponse.json(
+        { error: "Gemini API failed" },
+        { status: 500 }
+      )
     }
 
     const geminiData = await geminiResponse.json()
@@ -178,35 +187,50 @@ export async function POST(req: NextRequest) {
     } catch {
       const match = raw.match(/\{[\s\S]*\}/)
       if (!match) {
-        return NextResponse.json({ error: "Malformed JSON from AI" }, { status: 500 })
+        return NextResponse.json(
+          { error: "Malformed JSON from AI" },
+          { status: 500 }
+        )
       }
       parsed = JSON.parse(match[0])
     }
 
     if (!parsed?.nodes) {
-      return NextResponse.json({ error: "AI did not return nodes array" }, { status: 500 })
+      return NextResponse.json(
+        { error: "AI did not return nodes array" },
+        { status: 500 }
+      )
     }
 
     const normalized = validateAndNormalizeGraph(parsed.nodes)
 
     if (!normalized) {
-      return NextResponse.json({ error: "Invalid graph structure" }, { status: 500 })
+      return NextResponse.json(
+        { error: "Invalid graph structure" },
+        { status: 500 }
+      )
     }
 
-    /* Insert new map */
+    /* =========================================================
+       STORE IN DATABASE
+    ========================================================= */
+
     const { data: map } = await supabase
       .from("architect_maps")
       .insert({
         user_id: user.id,
         topic,
         education_stage,
-        hash: crypto.randomUUID() // prevent collisions
+        hash: crypto.randomUUID()
       })
       .select()
       .single()
 
     if (!map) {
-      return NextResponse.json({ error: "Failed to create architect map" }, { status: 500 })
+      return NextResponse.json(
+        { error: "Failed to create architect map" },
+        { status: 500 }
+      )
     }
 
     const nodeInsertData = normalized.map((n, index) => ({
@@ -223,7 +247,10 @@ export async function POST(req: NextRequest) {
       .select()
 
     if (!insertedNodes) {
-      return NextResponse.json({ error: "Failed to insert nodes" }, { status: 500 })
+      return NextResponse.json(
+        { error: "Failed to insert nodes" },
+        { status: 500 }
+      )
     }
 
     const idLookup: Record<string, string> = {}
@@ -249,15 +276,30 @@ export async function POST(req: NextRequest) {
       await supabase.from("architect_edges").insert(edgeInsertData)
     }
 
+    /* =========================================================
+       🔥 RETURN GRAPH FOR DIAGNOSE COMPATIBILITY
+    ========================================================= */
+
+    const graph = normalized.map(n => ({
+      id: n.id,
+      name: n.name,
+      description: n.description,
+      prerequisites: n.prerequisites || []
+    }))
+
     return NextResponse.json({
       source: "generated",
       map_id: map.id,
+      graph,               // ✅ Diagnose expects this
       nodes: insertedNodes,
       edges: edgeInsertData
     })
 
   } catch (err) {
     console.error("Architect fatal error:", err)
-    return NextResponse.json({ error: "Architect failed" }, { status: 500 })
+    return NextResponse.json(
+      { error: "Architect failed" },
+      { status: 500 }
+    )
   }
 }
