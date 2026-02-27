@@ -252,11 +252,17 @@ if (!parsed?.nodes) {
       .single()
 
     if (mapError || !map) {
-      return NextResponse.json(
-        { error: "Failed to create architect map" },
-        { status: 500 }
-      )
-    }
+  console.error("Map insert error:", mapError)
+
+  return NextResponse.json(
+    {
+      error: "Failed to create architect map",
+      details: mapError?.message,
+      code: mapError?.code
+    },
+    { status: 500 }
+  )
+}
 
     // 🧱 Insert nodes
     const nodeInsertData = normalized.map((n, index) => ({
