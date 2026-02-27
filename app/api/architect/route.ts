@@ -16,12 +16,11 @@ type GeminiNode = {
 ========================================================= */
 function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
   if (!Array.isArray(nodes) || nodes.length === 0) return null
-  if (nodes.length > 15) return null
+  if (nodes.length > 12) return null
 
   const normalized: GeminiNode[] = []
   const idMap = new Map<string, string>()
 
-  // Normalize IDs
   nodes.forEach((node: any, index: number) => {
     if (!node?.id || !node?.name) return
 
@@ -37,7 +36,6 @@ function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
     })
   })
 
-  // Map prerequisites safely
   nodes.forEach((node: any, index: number) => {
     if (!normalized[index]) return
 
@@ -47,12 +45,9 @@ function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
 
     normalized[index].prerequisites = prereqs
       .map((p: string) => idMap.get(p))
-      .filter((p): p is string => {
-        return typeof p === "string" && p !== normalized[index].id
-      })
+      .filter((p): p is string => typeof p === "string" && p !== normalized[index].id)
   })
 
-  // Cycle detection
   const visited = new Set<string>()
   const stack = new Set<string>()
 
@@ -78,27 +73,7 @@ function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
     if (hasCycle(node.id)) return null
   }
 
-  // Topological sort
-  const sorted: GeminiNode[] = []
-  const seen = new Set<string>()
-
-  function topo(id: string) {
-    if (seen.has(id)) return
-    seen.add(id)
-
-    const node = normalized.find(n => n.id === id)
-    if (!node) return
-
-    for (const dep of node.prerequisites || []) {
-      topo(dep)
-    }
-
-    sorted.push(node)
-  }
-
-  normalized.forEach(n => topo(n.id))
-
-  return sorted
+  return normalized
 }
 
 /* =========================================================
@@ -110,10 +85,7 @@ export async function POST(req: NextRequest) {
     const { topic, education_stage } = await req.json()
 
     if (!topic || !education_stage) {
-      return NextResponse.json(
-        { error: "Missing parameters" },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: "Missing parameters" }, { status: 400 })
     }
 
     const cookieStore = cookies()
@@ -138,52 +110,11 @@ export async function POST(req: NextRequest) {
     } = await supabase.auth.getUser()
 
     if (!user || authError) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      )
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const hash = crypto
-      .createHash("sha256")
-      .update(`${topic.toLowerCase()}::${education_stage}`)
-      .digest("hex")
+    /* 🔥 CACHE REMOVED — ALWAYS GENERATE FRESH */
 
-    // Check existing
-    const { data: existingMap, error: existingError } = await supabase
-      .from("architect_maps")
-      .select("*")
-      .eq("user_id", user.id)
-      .eq("hash", hash)
-      .maybeSingle()
-
-    if (existingError) {
-      return NextResponse.json(
-        { error: "Failed to check existing maps" },
-        { status: 500 }
-      )
-    }
-
-    if (existingMap) {
-      const { data: nodes } = await supabase
-        .from("architect_nodes")
-        .select("*")
-        .eq("map_id", existingMap.id)
-
-      const { data: edges } = await supabase
-        .from("architect_edges")
-        .select("*")
-        .eq("map_id", existingMap.id)
-
-      return NextResponse.json({
-        source: "existing",
-        map_id: existingMap.id,
-        nodes: nodes || [],
-        edges: edges || []
-      })
-    }
-
-    // Gemini call
     const geminiResponse = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
       {
@@ -199,9 +130,16 @@ export async function POST(req: NextRequest) {
                 {
                   text:
                     "You are a curriculum decomposition engine.\n\n" +
-                    "Decompose the topic: " + topic + "\n" +
-                    "For education level: " + education_stage + "\n\n" +
+                    "Topic: " + topic + "\n" +
+                    "Education Level: " + education_stage + "\n\n" +
                     "Return ONLY valid JSON.\n\n" +
+                    "CRITICAL:\n" +
+                    "- All concepts MUST directly relate to the topic.\n" +
+                    "- If the topic is biology, DO NOT include programming.\n" +
+                    "- If the topic is physics, DO NOT include unrelated domains.\n" +
+                    "- Maximum 8 major conceptual pillars.\n" +
+                    "- Strict Directed Acyclic Graph.\n" +
+                    "- No cycles.\n\n" +
                     "Format:\n" +
                     "{\n" +
                     '  "nodes": [\n' +
@@ -209,17 +147,11 @@ export async function POST(req: NextRequest) {
                     '      "id": "x",\n' +
                     '      "name": "Concept",\n' +
                     '      "description": "Short explanation",\n' +
-                    '      "inclusion_reasoning": "Why this concept is structurally required",\n' +
+                    '      "inclusion_reasoning": "Why this concept is required",\n' +
                     '      "prerequisites": []\n' +
                     "    }\n" +
                     "  ]\n" +
-                    "}\n\n" +
-                    "Rules:\n" +
-                    "- Maximum 8 nodes\n" +
-                    "- Strict Directed Acyclic Graph\n" +
-                    "- No cycles\n" +
-                    "- No unrelated topics\n" +
-                    "- All nodes must directly relate to the given topic\n"
+                    "}"
                 }
               ]
             }
@@ -229,13 +161,11 @@ export async function POST(req: NextRequest) {
     )
 
     if (!geminiResponse.ok) {
-      return NextResponse.json(
-        { error: "Gemini API failed" },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: "Gemini API failed" }, { status: 500 })
     }
 
     const geminiData = await geminiResponse.json()
+
     let raw =
       geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
@@ -248,46 +178,35 @@ export async function POST(req: NextRequest) {
     } catch {
       const match = raw.match(/\{[\s\S]*\}/)
       if (!match) {
-        return NextResponse.json(
-          { error: "Malformed JSON from AI" },
-          { status: 500 }
-        )
+        return NextResponse.json({ error: "Malformed JSON from AI" }, { status: 500 })
       }
       parsed = JSON.parse(match[0])
     }
 
     if (!parsed?.nodes) {
-      return NextResponse.json(
-        { error: "AI did not return nodes array" },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: "AI did not return nodes array" }, { status: 500 })
     }
 
     const normalized = validateAndNormalizeGraph(parsed.nodes)
 
     if (!normalized) {
-      return NextResponse.json(
-        { error: "Invalid graph structure (cycle detected)" },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: "Invalid graph structure" }, { status: 500 })
     }
 
-    const { data: map, error: mapError } = await supabase
+    /* Insert new map */
+    const { data: map } = await supabase
       .from("architect_maps")
       .insert({
         user_id: user.id,
         topic,
         education_stage,
-        hash
+        hash: crypto.randomUUID() // prevent collisions
       })
       .select()
       .single()
 
-    if (mapError || !map) {
-      return NextResponse.json(
-        { error: "Failed to create architect map" },
-        { status: 500 }
-      )
+    if (!map) {
+      return NextResponse.json({ error: "Failed to create architect map" }, { status: 500 })
     }
 
     const nodeInsertData = normalized.map((n, index) => ({
@@ -304,10 +223,7 @@ export async function POST(req: NextRequest) {
       .select()
 
     if (!insertedNodes) {
-      return NextResponse.json(
-        { error: "Failed to insert architect nodes" },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: "Failed to insert nodes" }, { status: 500 })
     }
 
     const idLookup: Record<string, string> = {}
@@ -342,9 +258,6 @@ export async function POST(req: NextRequest) {
 
   } catch (err) {
     console.error("Architect fatal error:", err)
-    return NextResponse.json(
-      { error: "Architect failed" },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: "Architect failed" }, { status: 500 })
   }
 }
