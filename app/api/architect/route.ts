@@ -12,7 +12,7 @@ type GeminiNode = {
 }
 
 /* =========================================================
-   STRICT GRAPH VALIDATION (NO LOOPS, TRUE DAG ONLY)
+   STRICT GRAPH VALIDATION (TRUE DAG ONLY)
 ========================================================= */
 function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
   if (!Array.isArray(nodes) || nodes.length === 0) return null
@@ -21,8 +21,8 @@ function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
   const normalized: GeminiNode[] = []
   const idMap = new Map<string, string>()
 
-  // 1️⃣ Normalize IDs
-  nodes.forEach((node, index) => {
+  // Normalize IDs
+  nodes.forEach((node: any, index: number) => {
     if (!node?.id || !node?.name) return
 
     const newId = `n${index + 1}`
@@ -37,21 +37,22 @@ function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
     })
   })
 
-  // 2️⃣ Map prerequisites safely (remove self deps)
-  nodes.forEach((node, index) => {
-    const prereqs = Array.isArray(node?.prerequisites)
+  // Map prerequisites safely
+  nodes.forEach((node: any, index: number) => {
+    if (!normalized[index]) return
+
+    const prereqs: string[] = Array.isArray(node?.prerequisites)
       ? node.prerequisites
       : []
 
-    if (!normalized[index]) return
-
     normalized[index].prerequisites = prereqs
-  .map((p: string) => idMap.get(p))
-  .filter((p: string | undefined): p is string => {
-    return !!p && p !== normalized[index].id
+      .map((p: string) => idMap.get(p))
+      .filter((p): p is string => {
+        return typeof p === "string" && p !== normalized[index].id
+      })
   })
 
-  // 3️⃣ Detect Cycles (DFS)
+  // Cycle detection (DFS)
   const visited = new Set<string>()
   const stack = new Set<string>()
 
@@ -74,30 +75,28 @@ function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
   }
 
   for (const node of normalized) {
-    if (hasCycle(node.id)) {
-      return null // Reject cyclic graph entirely
-    }
+    if (hasCycle(node.id)) return null
   }
 
-  // 4️⃣ Topological Sort
+  // Topological sort
   const sorted: GeminiNode[] = []
-  const tempVisited = new Set<string>()
+  const seen = new Set<string>()
 
-  function topoSort(id: string) {
-    if (tempVisited.has(id)) return
-    tempVisited.add(id)
+  function topo(id: string) {
+    if (seen.has(id)) return
+    seen.add(id)
 
     const node = normalized.find(n => n.id === id)
     if (!node) return
 
     for (const dep of node.prerequisites || []) {
-      topoSort(dep)
+      topo(dep)
     }
 
     sorted.push(node)
   }
 
-  normalized.forEach(node => topoSort(node.id))
+  normalized.forEach(n => topo(n.id))
 
   return sorted
 }
@@ -105,6 +104,7 @@ function validateAndNormalizeGraph(nodes: any[]): GeminiNode[] | null {
 /* =========================================================
    API HANDLER
 ========================================================= */
+
 export async function POST(req: NextRequest) {
   try {
     const { topic, education_stage } = await req.json()
@@ -132,7 +132,6 @@ export async function POST(req: NextRequest) {
       }
     )
 
-    // 🔐 Require authenticated user
     const {
       data: { user },
       error: authError
@@ -150,7 +149,7 @@ export async function POST(req: NextRequest) {
       .update(`${topic.toLowerCase()}::${education_stage}`)
       .digest("hex")
 
-    // 🔎 Check existing map
+    // Check existing
     const { data: existingMap, error: existingError } = await supabase
       .from("architect_maps")
       .select("*")
@@ -160,11 +159,7 @@ export async function POST(req: NextRequest) {
 
     if (existingError) {
       return NextResponse.json(
-        {
-          error: "Failed to check existing maps",
-          details: existingError.message,
-          code: existingError.code
-        },
+        { error: "Failed to check existing maps" },
         { status: 500 }
       )
     }
@@ -188,8 +183,7 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    /* ================= Gemini Call ================= */
-
+    // Gemini call
     const geminiResponse = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
       {
@@ -208,26 +202,11 @@ You are a curriculum decomposition engine.
 
 Return ONLY valid JSON.
 
-Format:
-{
-  "nodes": [
-    {
-      "id": "x",
-      "name": "Concept",
-      "description": "Short explanation",
-      "inclusion_reasoning": "Why this concept is structurally required",
-      "prerequisites": []
-    }
-  ]
-}
-
 Rules:
-- Atomic conceptual units
-- Strict Directed Acyclic Graph (NO cycles)
-- No circular dependencies
+- Strict Directed Acyclic Graph
+- No cycles
 - No mutual prerequisites
 - Maximum 12 nodes
-- Educationally coherent
 `
                 }
               ]
@@ -245,34 +224,24 @@ Rules:
     }
 
     const geminiData = await geminiResponse.json()
-
     let raw =
       geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || ""
 
-    if (!raw) {
-      return NextResponse.json(
-        { error: "Empty response from AI" },
-        { status: 500 }
-      )
-    }
-
-    raw = raw.replace(/```json/gi, "")
-    raw = raw.replace(/```/g, "")
-    raw = raw.trim()
+    raw = raw.replace(/```json/gi, "").replace(/```/g, "").trim()
 
     let parsed: any
 
     try {
       parsed = JSON.parse(raw)
     } catch {
-      const jsonMatch = raw.match(/\{[\s\S]*\}/)
-      if (!jsonMatch) {
+      const match = raw.match(/\{[\s\S]*\}/)
+      if (!match) {
         return NextResponse.json(
           { error: "Malformed JSON from AI" },
           { status: 500 }
         )
       }
-      parsed = JSON.parse(jsonMatch[0])
+      parsed = JSON.parse(match[0])
     }
 
     if (!parsed?.nodes) {
@@ -291,8 +260,7 @@ Rules:
       )
     }
 
-    /* ================= Insert Map ================= */
-
+    // Insert map
     const { data: map, error: mapError } = await supabase
       .from("architect_maps")
       .insert({
@@ -311,8 +279,7 @@ Rules:
       )
     }
 
-    /* ================= Insert Nodes ================= */
-
+    // Insert nodes
     const nodeInsertData = normalized.map((n, index) => ({
       map_id: map.id,
       name: n.name,
@@ -321,16 +288,12 @@ Rules:
       level: index
     }))
 
-    const { data: insertedNodes, error: insertError } = await supabase
+    const { data: insertedNodes } = await supabase
       .from("architect_nodes")
       .insert(nodeInsertData)
       .select()
 
-    if (
-      insertError ||
-      !insertedNodes ||
-      insertedNodes.length !== normalized.length
-    ) {
+    if (!insertedNodes) {
       return NextResponse.json(
         { error: "Failed to insert architect nodes" },
         { status: 500 }
@@ -341,8 +304,6 @@ Rules:
     normalized.forEach((n, i) => {
       idLookup[n.id] = insertedNodes[i].id
     })
-
-    /* ================= Insert Edges ================= */
 
     const edgeInsertData: any[] = []
 
@@ -361,17 +322,6 @@ Rules:
     if (edgeInsertData.length) {
       await supabase.from("architect_edges").insert(edgeInsertData)
     }
-
-    /* ================= Initialize Stability ================= */
-
-    const stabilityInit = insertedNodes.map(node => ({
-      user_id: user.id,
-      node_id: node.id,
-      stability_state: "fragile",
-      confidence_score: 0
-    }))
-
-    await supabase.from("architect_stability").insert(stabilityInit)
 
     return NextResponse.json({
       source: "generated",
